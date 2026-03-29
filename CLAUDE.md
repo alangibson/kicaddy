@@ -63,6 +63,12 @@ main.py          # CLI entry point (argparse)
 | `key` | TEXT | |
 | `value` | TEXT | |
 
+## Packaging
+
+`pyproject.toml` uses `build-backend = "setuptools.build_meta"` — the standard
+modern setuptools backend. Do not use `setuptools.backends.legacy:build`; that
+path does not exist in current setuptools and raises `BackendUnavailable`.
+
 ## Key Design Notes
 
 - **Parsing**: uses [`kicad-sym`](https://pypi.org/project/kicad-sym/) — purpose-built
