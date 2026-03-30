@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from kicaddy.models import Library, Symbol, SymbolProperty
+from kicaddy.models import Footprint, Library, Symbol, SymbolProperty
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS library (
@@ -12,6 +12,17 @@ CREATE TABLE IF NOT EXISTS library (
     version           INTEGER  NOT NULL DEFAULT 0,
     generator         TEXT     NOT NULL DEFAULT '',
     generator_version TEXT     NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS footprint (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_id         INTEGER NOT NULL REFERENCES library(id) ON DELETE CASCADE,
+    name               TEXT    NOT NULL DEFAULT '',
+    description        TEXT    NOT NULL DEFAULT '',
+    tags               TEXT    NOT NULL DEFAULT '',
+    layer              TEXT    NOT NULL DEFAULT '',
+    kicad_footprint_id TEXT    NOT NULL DEFAULT '',
+    UNIQUE (library_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS symbol (
@@ -27,6 +38,7 @@ CREATE TABLE IF NOT EXISTS symbol (
     datasheet        TEXT    NOT NULL DEFAULT '',
     description      TEXT    NOT NULL DEFAULT '',
     keywords         TEXT    NOT NULL DEFAULT '',
+    footprint_id     INTEGER REFERENCES footprint(id),
     UNIQUE (library_id, name)
 );
 
@@ -36,6 +48,12 @@ CREATE TABLE IF NOT EXISTS symbol_property (
     key       TEXT    NOT NULL,
     value     TEXT    NOT NULL DEFAULT ''
 );
+
+CREATE INDEX IF NOT EXISTS idx_footprint_library_id
+    ON footprint(library_id);
+
+CREATE INDEX IF NOT EXISTS idx_footprint_kicad_id
+    ON footprint(kicad_footprint_id);
 
 CREATE INDEX IF NOT EXISTS idx_symbol_library_id
     ON symbol(library_id);
@@ -57,6 +75,12 @@ def create_schema(conn: sqlite3.Connection) -> None:
     """Execute all CREATE TABLE / CREATE INDEX DDL statements."""
     conn.executescript(_DDL)
     conn.commit()
+    # Migrate existing databases that predate the footprint_id column.
+    try:
+        conn.execute("ALTER TABLE symbol ADD COLUMN footprint_id INTEGER REFERENCES footprint(id)")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
 
 
 def upsert_library(conn: sqlite3.Connection, lib: Library) -> int:
@@ -151,3 +175,51 @@ def insert_symbol_properties(
             "INSERT INTO symbol_property (symbol_id, key, value) VALUES (?, ?, ?)",
             [(symbol_id, p.key, p.value) for p in properties],
         )
+
+
+def insert_footprint(conn: sqlite3.Connection, footprint: Footprint) -> int:
+    """
+    Insert or replace a Footprint row. Returns the row id.
+    Populates footprint.id in-place.
+    """
+    cur = conn.execute(
+        """
+        INSERT INTO footprint
+            (library_id, name, description, tags, layer, kicad_footprint_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(library_id, name) DO UPDATE SET
+            description        = excluded.description,
+            tags               = excluded.tags,
+            layer              = excluded.layer,
+            kicad_footprint_id = excluded.kicad_footprint_id
+        RETURNING id
+        """,
+        (
+            footprint.library_id,
+            footprint.name,
+            footprint.description,
+            footprint.tags,
+            footprint.layer,
+            footprint.kicad_footprint_id,
+        ),
+    )
+    row = cur.fetchone()
+    footprint.id = row[0]
+    return footprint.id
+
+
+def link_symbols_to_footprints(conn: sqlite3.Connection) -> None:
+    """
+    Populate symbol.footprint_id by matching symbol.footprint (e.g.
+    "Resistor_SMD:R_0402_1005Metric") against footprint.kicad_footprint_id.
+    """
+    conn.execute(
+        """
+        UPDATE symbol
+        SET footprint_id = (
+            SELECT f.id FROM footprint f
+            WHERE f.kicad_footprint_id = symbol.footprint
+        )
+        WHERE symbol.footprint != ''
+        """
+    )
