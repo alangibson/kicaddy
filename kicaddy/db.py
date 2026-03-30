@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from kicaddy.models import Footprint, Library, Symbol, SymbolProperty, ThreeDModel
+from kicaddy.models import Footprint, Library, Solid, Symbol, SymbolProperty
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS library (
@@ -26,14 +26,14 @@ CREATE TABLE IF NOT EXISTS footprint (
     UNIQUE (library_id, name)
 );
 
-CREATE TABLE IF NOT EXISTS threedmodel (
+CREATE TABLE IF NOT EXISTS solid (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     footprint_id INTEGER NOT NULL UNIQUE REFERENCES footprint(id) ON DELETE CASCADE,
     model_path   TEXT    NOT NULL DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS idx_threedmodel_footprint_id
-    ON threedmodel(footprint_id);
+CREATE INDEX IF NOT EXISTS idx_solid_footprint_id
+    ON solid(footprint_id);
 
 CREATE TABLE IF NOT EXISTS symbol (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -225,14 +225,14 @@ def insert_footprint(conn: sqlite3.Connection, footprint: Footprint) -> int:
     return footprint.id
 
 
-def insert_threedmodel(conn: sqlite3.Connection, model: ThreeDModel) -> int:
+def insert_solid(conn: sqlite3.Connection, model: Solid) -> int:
     """
-    Insert or replace a ThreeDModel row. Returns the row id.
+    Insert or replace a Solid row. Returns the row id.
     Populates model.id in-place.
     """
     cur = conn.execute(
         """
-        INSERT INTO threedmodel (footprint_id, model_path)
+        INSERT INTO solid (footprint_id, model_path)
         VALUES (?, ?)
         ON CONFLICT(footprint_id) DO UPDATE SET
             model_path = excluded.model_path

@@ -6,7 +6,7 @@ from typing import Sequence
 
 import kicad_sym
 
-from kicaddy.models import Footprint, Library, LibraryType, STANDARD_PROPERTY_KEYS, Symbol, SymbolProperty, ThreeDModel
+from kicaddy.models import Footprint, Library, LibraryType, Solid, STANDARD_PROPERTY_KEYS, Symbol, SymbolProperty
 
 logger = logging.getLogger(__name__)
 
@@ -188,10 +188,10 @@ def _parse_footprint_file(
     layer_node = kicad_sym.child(tree, "layer")
     layer = str(layer_node[1]) if layer_node else ""
 
-    threedmodel: ThreeDModel | None = None
+    solid: Solid | None = None
     model_node = kicad_sym.child(tree, "model")
     if model_node:
-        threedmodel = ThreeDModel(model_path=str(model_node[1]))
+        solid = Solid(model_path=str(model_node[1]))
 
     return Footprint(
         library_id=library_id,
@@ -201,5 +201,5 @@ def _parse_footprint_file(
         layer=layer,
         kicad_footprint_id=f"{library_name}:{name}",
         file_path=file_path,
-        threedmodel=threedmodel,
+        solid=solid,
     )

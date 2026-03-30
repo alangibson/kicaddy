@@ -139,9 +139,9 @@ def crawl_and_index(
             footprint.library_id = library_id
             try:
                 db.insert_footprint(conn, footprint)
-                if footprint.threedmodel is not None:
-                    footprint.threedmodel.footprint_id = footprint.id
-                    db.insert_threedmodel(conn, footprint.threedmodel)
+                if footprint.solid is not None:
+                    footprint.solid.footprint_id = footprint.id
+                    db.insert_solid(conn, footprint.solid)
                 stats.footprints_indexed += 1
                 pending_commits += 1
             except Exception as exc:
