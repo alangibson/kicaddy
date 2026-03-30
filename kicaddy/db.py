@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from kicaddy.models import Footprint, Library, Symbol, SymbolProperty
+from kicaddy.models import Footprint, Library, Solid, Symbol, SymbolProperty
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS library (
@@ -22,8 +22,18 @@ CREATE TABLE IF NOT EXISTS footprint (
     tags               TEXT    NOT NULL DEFAULT '',
     layer              TEXT    NOT NULL DEFAULT '',
     kicad_footprint_id TEXT    NOT NULL DEFAULT '',
+    file_path          TEXT    NOT NULL DEFAULT '',
     UNIQUE (library_id, name)
 );
+
+CREATE TABLE IF NOT EXISTS solid (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    footprint_id INTEGER NOT NULL UNIQUE REFERENCES footprint(id) ON DELETE CASCADE,
+    model_path   TEXT    NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_solid_footprint_id
+    ON solid(footprint_id);
 
 CREATE TABLE IF NOT EXISTS symbol (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,6 +88,11 @@ def create_schema(conn: sqlite3.Connection) -> None:
     # Migrate existing databases that predate the footprint_id column.
     try:
         conn.execute("ALTER TABLE symbol ADD COLUMN footprint_id INTEGER REFERENCES footprint(id)")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    try:
+        conn.execute("ALTER TABLE footprint ADD COLUMN file_path TEXT NOT NULL DEFAULT ''")
         conn.commit()
     except sqlite3.OperationalError:
         pass  # column already exists
@@ -185,13 +200,14 @@ def insert_footprint(conn: sqlite3.Connection, footprint: Footprint) -> int:
     cur = conn.execute(
         """
         INSERT INTO footprint
-            (library_id, name, description, tags, layer, kicad_footprint_id)
-        VALUES (?, ?, ?, ?, ?, ?)
+            (library_id, name, description, tags, layer, kicad_footprint_id, file_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(library_id, name) DO UPDATE SET
             description        = excluded.description,
             tags               = excluded.tags,
             layer              = excluded.layer,
-            kicad_footprint_id = excluded.kicad_footprint_id
+            kicad_footprint_id = excluded.kicad_footprint_id,
+            file_path          = excluded.file_path
         RETURNING id
         """,
         (
@@ -201,11 +217,32 @@ def insert_footprint(conn: sqlite3.Connection, footprint: Footprint) -> int:
             footprint.tags,
             footprint.layer,
             footprint.kicad_footprint_id,
+            footprint.file_path,
         ),
     )
     row = cur.fetchone()
     footprint.id = row[0]
     return footprint.id
+
+
+def insert_solid(conn: sqlite3.Connection, model: Solid) -> int:
+    """
+    Insert or replace a Solid row. Returns the row id.
+    Populates model.id in-place.
+    """
+    cur = conn.execute(
+        """
+        INSERT INTO solid (footprint_id, model_path)
+        VALUES (?, ?)
+        ON CONFLICT(footprint_id) DO UPDATE SET
+            model_path = excluded.model_path
+        RETURNING id
+        """,
+        (model.footprint_id, model.model_path),
+    )
+    row = cur.fetchone()
+    model.id = row[0]
+    return model.id
 
 
 def link_symbols_to_footprints(conn: sqlite3.Connection) -> None:

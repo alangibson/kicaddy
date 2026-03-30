@@ -6,7 +6,7 @@ from typing import Sequence
 
 import kicad_sym
 
-from kicaddy.models import Footprint, Library, LibraryType, STANDARD_PROPERTY_KEYS, Symbol, SymbolProperty
+from kicaddy.models import Footprint, Library, LibraryType, Solid, STANDARD_PROPERTY_KEYS, Symbol, SymbolProperty
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +159,8 @@ def parse_footprint_library_dir(
     footprints: list[Footprint] = []
     for mod_file in sorted(dir_path.glob("*.kicad_mod")):
         try:
-            fp = _parse_footprint_file(mod_file, library_id=0, library_name=library_name)
+            file_path = f"{library_path}/{mod_file.name}"
+            fp = _parse_footprint_file(mod_file, library_id=0, library_name=library_name, file_path=file_path)
             footprints.append(fp)
         except Exception as exc:
             logger.warning("Failed to parse footprint %s: %s", mod_file, exc)
@@ -171,6 +172,7 @@ def _parse_footprint_file(
     mod_file: Path,
     library_id: int,
     library_name: str,
+    file_path: str = "",
 ) -> Footprint:
     """Parse a single .kicad_mod file and return a Footprint."""
     tree = kicad_sym.load(mod_file)
@@ -186,6 +188,11 @@ def _parse_footprint_file(
     layer_node = kicad_sym.child(tree, "layer")
     layer = str(layer_node[1]) if layer_node else ""
 
+    solid: Solid | None = None
+    model_node = kicad_sym.child(tree, "model")
+    if model_node:
+        solid = Solid(model_path=str(model_node[1]))
+
     return Footprint(
         library_id=library_id,
         name=name,
@@ -193,4 +200,6 @@ def _parse_footprint_file(
         tags=tags,
         layer=layer,
         kicad_footprint_id=f"{library_name}:{name}",
+        file_path=file_path,
+        solid=solid,
     )
