@@ -41,6 +41,17 @@ class SymbolProperty:
 
 
 @dataclass
+class Footprint:
+    library_id: int             # FK → library.id
+    name: str                   # stem of .kicad_mod filename
+    description: str = ""       # from (descr "...")
+    tags: str = ""              # from (tags "...")
+    layer: str = ""             # from (layer "...")
+    kicad_footprint_id: str = ""  # e.g. "Resistor_SMD:R_0402_1005Metric"
+    id: int | None = None
+
+
+@dataclass
 class Symbol:
     library_id: int             # FK → library.id
     name: str

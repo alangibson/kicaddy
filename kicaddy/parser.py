@@ -6,7 +6,7 @@ from typing import Sequence
 
 import kicad_sym
 
-from kicaddy.models import Library, LibraryType, STANDARD_PROPERTY_KEYS, Symbol, SymbolProperty
+from kicaddy.models import Footprint, Library, LibraryType, STANDARD_PROPERTY_KEYS, Symbol, SymbolProperty
 
 logger = logging.getLogger(__name__)
 
@@ -132,3 +132,65 @@ def _node_children(
         for child in node
         if isinstance(child, list) and kicad_sym.head(child) == tag
     ]
+
+
+def parse_footprint_library_dir(
+    dir_path: Path,
+    library_path: str,
+) -> tuple[Library, list[Footprint]]:
+    """
+    Parse a .pretty footprint library directory and return (Library, list[Footprint]).
+
+    Each .kicad_mod file in the directory becomes one Footprint.
+    Footprint.library_id is left as 0 — the caller must set it after persisting
+    the Library row.
+
+    Logs a warning and skips individual files that cannot be parsed.
+    """
+    library = Library(
+        library_path=library_path,
+        library_type=LibraryType.FOOTPRINT,
+        version=0,
+        generator="",
+        generator_version="",
+    )
+
+    library_name = Path(library_path).stem
+    footprints: list[Footprint] = []
+    for mod_file in sorted(dir_path.glob("*.kicad_mod")):
+        try:
+            fp = _parse_footprint_file(mod_file, library_id=0, library_name=library_name)
+            footprints.append(fp)
+        except Exception as exc:
+            logger.warning("Failed to parse footprint %s: %s", mod_file, exc)
+
+    return library, footprints
+
+
+def _parse_footprint_file(
+    mod_file: Path,
+    library_id: int,
+    library_name: str,
+) -> Footprint:
+    """Parse a single .kicad_mod file and return a Footprint."""
+    tree = kicad_sym.load(mod_file)
+
+    name = mod_file.stem
+
+    descr_node = kicad_sym.child(tree, "descr")
+    description = str(descr_node[1]) if descr_node else ""
+
+    tags_node = kicad_sym.child(tree, "tags")
+    tags = str(tags_node[1]) if tags_node else ""
+
+    layer_node = kicad_sym.child(tree, "layer")
+    layer = str(layer_node[1]) if layer_node else ""
+
+    return Footprint(
+        library_id=library_id,
+        name=name,
+        description=description,
+        tags=tags,
+        layer=layer,
+        kicad_footprint_id=f"{library_name}:{name}",
+    )
