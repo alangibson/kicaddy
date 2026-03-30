@@ -41,6 +41,13 @@ class SymbolProperty:
 
 
 @dataclass
+class ThreeDModel:
+    model_path: str              # relative path as stored in the .kicad_mod file
+    footprint_id: int | None = None
+    id: int | None = None
+
+
+@dataclass
 class Footprint:
     library_id: int             # FK → library.id
     name: str                   # stem of .kicad_mod filename
@@ -48,6 +55,8 @@ class Footprint:
     tags: str = ""              # from (tags "...")
     layer: str = ""             # from (layer "...")
     kicad_footprint_id: str = ""  # e.g. "Resistor_SMD:R_0402_1005Metric"
+    file_path: str = ""         # relative path of the .kicad_mod file
+    threedmodel: ThreeDModel | None = None
     id: int | None = None
 
 
