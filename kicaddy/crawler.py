@@ -161,8 +161,9 @@ def crawl_and_index(
 
     conn.commit()
 
-    # Phase 3: link symbol.footprint_id → footprint.id
+    # Phase 3: link symbol.footprint_id → footprint.id, then populate part table
     db.link_symbols_to_footprints(conn)
+    db.insert_parts_from_links(conn)
     conn.commit()
 
     return stats

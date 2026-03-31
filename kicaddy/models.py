@@ -89,6 +89,13 @@ class Footprint:
 
 
 @dataclass
+class Part:
+    symbol_id: int    # FK → symbol.id
+    footprint_id: int # FK → footprint.id
+    id: int | None = None
+
+
+@dataclass
 class Symbol:
     library_id: int             # FK → library.id
     name: str

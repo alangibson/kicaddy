@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from kicaddy.models import Footprint, FootprintProperty, Library, Solid, Symbol, SymbolProperty
+from kicaddy.models import Footprint, FootprintProperty, Library, Part, Solid, Symbol, SymbolProperty
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS library (
@@ -86,6 +86,19 @@ CREATE INDEX IF NOT EXISTS idx_symbol_library_id
 
 CREATE INDEX IF NOT EXISTS idx_symbol_property_symbol_id
     ON symbol_property(symbol_id);
+
+CREATE TABLE IF NOT EXISTS part (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol_id    INTEGER NOT NULL REFERENCES symbol(id) ON DELETE CASCADE,
+    footprint_id INTEGER NOT NULL REFERENCES footprint(id) ON DELETE CASCADE,
+    UNIQUE (symbol_id, footprint_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_part_symbol_id
+    ON part(symbol_id);
+
+CREATE INDEX IF NOT EXISTS idx_part_footprint_id
+    ON part(footprint_id);
 """
 
 
@@ -334,5 +347,21 @@ def link_symbols_to_footprints(conn: sqlite3.Connection) -> None:
             WHERE f.kicad_footprint_id = symbol.footprint
         )
         WHERE symbol.footprint != ''
+        """
+    )
+
+
+def insert_parts_from_links(conn: sqlite3.Connection) -> None:
+    """
+    Populate the part table from existing symbol→footprint links.
+    Must be called after link_symbols_to_footprints().
+    Uses INSERT OR IGNORE for idempotency.
+    """
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO part (symbol_id, footprint_id)
+        SELECT id, footprint_id
+        FROM symbol
+        WHERE footprint_id IS NOT NULL
         """
     )
