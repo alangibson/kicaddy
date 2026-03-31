@@ -10,6 +10,86 @@ from kicaddy.models import Footprint, Library, LibraryType, Solid, STANDARD_PROP
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Property key aliases for extracted fields
+# ---------------------------------------------------------------------------
+
+_MPN_KEYS = ("MPN", "mpn", "Part Number", "PartNumber", "Part_Number", "PART_NUMBER")
+_MANUFACTURER_KEYS = ("Manufacturer", "MFR", "Mfr", "manufacturer", "MANUFACTURER")
+_PACKAGE_PROP_KEYS = ("Package", "package", "Package/Case", "Package / Case")
+
+# Library name prefixes / patterns that unambiguously indicate SMD packages
+_SMD_FOOTPRINT_LIBS = frozenset({
+    "Package_SO", "Package_QFP", "Package_QFN", "Package_BGA",
+    "Package_DFN", "Package_TO_SOT_SMD", "Package_LGA", "Package_CSP",
+})
+# Library name prefixes / patterns that unambiguously indicate THT packages
+_THT_FOOTPRINT_LIBS = frozenset({
+    "Package_DIP", "Package_TO_SOT_THT", "Package_TO_SOT_Axial",
+})
+# Footprint name sub-strings (case-insensitive check via lower()) → SMD
+_SMD_FP_HINTS = (
+    "soic", "sot-", "sot_", "qfn", "qfp", "bga", "dfn-", "dfn_",
+    "tssop", "ssop", "vssop", "sc-", "sc_", "wson", "uson", "lga",
+    "csp", "fcbga",
+)
+# Footprint name sub-strings → THT
+_THT_FP_HINTS = (
+    "dip-", "dip_", "to-220", "to_220", "to-92", "to_92",
+    "to-3", "to_3", "to-126", "to_126", "axial", "radial",
+    "sip-", "sip_", "_tht",
+)
+
+
+def _first(props: dict[str, str], keys: tuple[str, ...]) -> str:
+    """Return the value of the first matching key in props, or ''."""
+    for k in keys:
+        if k in props:
+            return props[k]
+    return ""
+
+
+def _infer_mounting(footprint_str: str, library_name: str) -> str:
+    """
+    Infer mounting type ("SMD", "THT", or "") from multiple sources, in priority order:
+
+    1. Footprint library name (part before ':') — explicit _SMD / _THT suffix or
+       known package-family library names.
+    2. Symbol library name — _SMD / _THT segment anywhere in the name.
+    3. Footprint name heuristics (sub-string matching).
+    """
+    fp_lib = ""
+    fp_name = ""
+    if ":" in footprint_str:
+        fp_lib, fp_name = footprint_str.split(":", 1)
+
+    # 1. Footprint library name
+    if fp_lib:
+        if "_SMD" in fp_lib or fp_lib in _SMD_FOOTPRINT_LIBS:
+            return "SMD"
+        if "_THT" in fp_lib or fp_lib in _THT_FOOTPRINT_LIBS:
+            return "THT"
+
+    # 2. Symbol library name segments
+    if library_name:
+        parts = library_name.split("_")
+        if "SMD" in parts:
+            return "SMD"
+        if "THT" in parts:
+            return "THT"
+
+    # 3. Footprint name heuristics
+    if fp_name:
+        fp_lower = fp_name.lower()
+        for hint in _SMD_FP_HINTS:
+            if hint in fp_lower:
+                return "SMD"
+        for hint in _THT_FP_HINTS:
+            if hint in fp_lower:
+                return "THT"
+
+    return ""
+
 
 def parse_library_file(
     file_path: Path,
@@ -32,12 +112,13 @@ def parse_library_file(
         return _empty_library(library_path, library_type), []
 
     library = _extract_library_metadata(lib_tree, library_path, library_type)
+    lib_name = Path(library_path).stem
 
     symbols: list[Symbol] = []
     for name in kicad_sym.symbol_names(lib_tree):
         try:
             sym_node = kicad_sym.get_symbol(lib_tree, name)
-            symbol = _extract_symbol(sym_node, name, library_id=0)
+            symbol = _extract_symbol(sym_node, name, library_id=0, library_name=lib_name)
             symbols.append(symbol)
         except Exception as exc:
             logger.warning("Failed to extract symbol %r from %s: %s", name, file_path, exc)
@@ -85,6 +166,7 @@ def _extract_symbol(
     sym_node: kicad_sym.Form,
     name: str,
     library_id: int,
+    library_name: str = "",
 ) -> Symbol:
     """
     Extract a Symbol from a parsed symbol form.
@@ -106,6 +188,13 @@ def _extract_symbol(
         if k not in STANDARD_PROPERTY_KEYS
     ]
 
+    footprint_str = props.get("Footprint", "")
+
+    # Package: prefer explicit property, fall back to footprint name (part after ':')
+    package = _first(props, _PACKAGE_PROP_KEYS)
+    if not package and ":" in footprint_str:
+        package = footprint_str.split(":", 1)[1]
+
     return Symbol(
         library_id=library_id,
         name=name,
@@ -114,10 +203,16 @@ def _extract_symbol(
         unit_id=props.get("UNIT_ID", ""),
         reference=props.get("Reference", ""),
         value=props.get("Value", ""),
-        footprint=props.get("Footprint", ""),
+        footprint=footprint_str,
         datasheet=props.get("Datasheet", ""),
         description=props.get("ki_description", ""),
         keywords=props.get("ki_keywords", ""),
+        mpn=_first(props, _MPN_KEYS),
+        manufacturer=_first(props, _MANUFACTURER_KEYS),
+        package=package,
+        mounting=_infer_mounting(footprint_str, library_name),
+        category=library_name.split("_")[0] if library_name else "",
+        library_name=library_name,
         extra_properties=extra_properties,
     )
 

@@ -49,6 +49,12 @@ CREATE TABLE IF NOT EXISTS symbol (
     description      TEXT    NOT NULL DEFAULT '',
     keywords         TEXT    NOT NULL DEFAULT '',
     footprint_id     INTEGER REFERENCES footprint(id),
+    mpn              TEXT    NOT NULL DEFAULT '',
+    manufacturer     TEXT    NOT NULL DEFAULT '',
+    package          TEXT    NOT NULL DEFAULT '',
+    mounting         TEXT    NOT NULL DEFAULT '',
+    category         TEXT    NOT NULL DEFAULT '',
+    library_name     TEXT    NOT NULL DEFAULT '',
     UNIQUE (library_id, name)
 );
 
@@ -96,6 +102,20 @@ def create_schema(conn: sqlite3.Connection) -> None:
         conn.commit()
     except sqlite3.OperationalError:
         pass  # column already exists
+    for col_def in (
+        "mpn          TEXT NOT NULL DEFAULT ''",
+        "manufacturer TEXT NOT NULL DEFAULT ''",
+        "package      TEXT NOT NULL DEFAULT ''",
+        "mounting     TEXT NOT NULL DEFAULT ''",
+        "category     TEXT NOT NULL DEFAULT ''",
+        "library_name TEXT NOT NULL DEFAULT ''",
+    ):
+        col_name = col_def.split()[0]
+        try:
+            conn.execute(f"ALTER TABLE symbol ADD COLUMN {col_def}")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
 
 def upsert_library(conn: sqlite3.Connection, lib: Library) -> int:
@@ -142,8 +162,9 @@ def insert_symbol(conn: sqlite3.Connection, symbol: Symbol) -> int:
         """
         INSERT INTO symbol
             (library_id, name, extends, kicad_library_id, unit_id,
-             reference, value, footprint, datasheet, description, keywords)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             reference, value, footprint, datasheet, description, keywords,
+             mpn, manufacturer, package, mounting, category, library_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(library_id, name) DO UPDATE SET
             extends          = excluded.extends,
             kicad_library_id = excluded.kicad_library_id,
@@ -153,7 +174,13 @@ def insert_symbol(conn: sqlite3.Connection, symbol: Symbol) -> int:
             footprint        = excluded.footprint,
             datasheet        = excluded.datasheet,
             description      = excluded.description,
-            keywords         = excluded.keywords
+            keywords         = excluded.keywords,
+            mpn              = excluded.mpn,
+            manufacturer     = excluded.manufacturer,
+            package          = excluded.package,
+            mounting         = excluded.mounting,
+            category         = excluded.category,
+            library_name     = excluded.library_name
         RETURNING id
         """,
         (
@@ -168,6 +195,12 @@ def insert_symbol(conn: sqlite3.Connection, symbol: Symbol) -> int:
             symbol.datasheet,
             symbol.description,
             symbol.keywords,
+            symbol.mpn,
+            symbol.manufacturer,
+            symbol.package,
+            symbol.mounting,
+            symbol.category,
+            symbol.library_name,
         ),
     )
     row = cur.fetchone()

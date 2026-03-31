@@ -11,6 +11,7 @@ class LibraryType(StrEnum):
 
 # Properties routed into dedicated Symbol columns rather than symbol_property.
 STANDARD_PROPERTY_KEYS: frozenset[str] = frozenset({
+    # Core KiCad fields
     "Reference",
     "Value",
     "Footprint",
@@ -19,6 +20,24 @@ STANDARD_PROPERTY_KEYS: frozenset[str] = frozenset({
     "ki_keywords",
     "LIBRARY_ID",
     "UNIT_ID",
+    # MPN aliases
+    "MPN",
+    "mpn",
+    "Part Number",
+    "PartNumber",
+    "Part_Number",
+    "PART_NUMBER",
+    # Manufacturer aliases
+    "Manufacturer",
+    "MFR",
+    "Mfr",
+    "manufacturer",
+    "MANUFACTURER",
+    # Package aliases
+    "Package",
+    "package",
+    "Package/Case",
+    "Package / Case",
 })
 
 
@@ -73,5 +92,13 @@ class Symbol:
     datasheet: str
     description: str            # from ki_description
     keywords: str               # from ki_keywords
+    # Extracted from symbol properties (with alias resolution)
+    mpn: str = ""              # Manufacturer Part Number
+    manufacturer: str = ""    # Manufacturer name
+    package: str = ""         # Package/footprint name (e.g. "SOT-23", "R_0402_1005Metric")
+    # Derived from library file path and footprint string
+    mounting: str = ""        # "SMD", "THT", or ""
+    category: str = ""        # First segment of library name (e.g. "Resistor", "MCU")
+    library_name: str = ""    # Stem of .kicad_sym file (e.g. "Resistor_SMD")
     extra_properties: list[SymbolProperty] = field(default_factory=list)
     id: int | None = None
