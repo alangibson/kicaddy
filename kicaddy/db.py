@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from kicaddy.models import Footprint, Library, Solid, Symbol, SymbolProperty
+from kicaddy.models import Footprint, FootprintProperty, Library, Solid, Symbol, SymbolProperty
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS library (
@@ -65,6 +65,16 @@ CREATE TABLE IF NOT EXISTS symbol_property (
     value     TEXT    NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS footprint_property (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    footprint_id INTEGER NOT NULL REFERENCES footprint(id) ON DELETE CASCADE,
+    key          TEXT    NOT NULL,
+    value        TEXT    NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_footprint_property_footprint_id
+    ON footprint_property(footprint_id);
+
 CREATE INDEX IF NOT EXISTS idx_footprint_library_id
     ON footprint(library_id);
 
@@ -102,6 +112,22 @@ def create_schema(conn: sqlite3.Connection) -> None:
         conn.commit()
     except sqlite3.OperationalError:
         pass  # column already exists
+    # Migrate existing databases that predate the footprint_property table.
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS footprint_property ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "footprint_id INTEGER NOT NULL REFERENCES footprint(id) ON DELETE CASCADE, "
+            "key TEXT NOT NULL, "
+            "value TEXT NOT NULL DEFAULT '')"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_footprint_property_footprint_id "
+            "ON footprint_property(footprint_id)"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # table already exists
     for col_def in (
         "mpn          TEXT NOT NULL DEFAULT ''",
         "manufacturer TEXT NOT NULL DEFAULT ''",
@@ -222,6 +248,23 @@ def insert_symbol_properties(
         conn.executemany(
             "INSERT INTO symbol_property (symbol_id, key, value) VALUES (?, ?, ?)",
             [(symbol_id, p.key, p.value) for p in properties],
+        )
+
+
+def insert_footprint_properties(
+    conn: sqlite3.Connection,
+    footprint_id: int,
+    properties: list[FootprintProperty],
+) -> None:
+    """
+    Replace all extra properties for a footprint.
+    Deletes existing rows then bulk-inserts the new ones.
+    """
+    conn.execute("DELETE FROM footprint_property WHERE footprint_id = ?", (footprint_id,))
+    if properties:
+        conn.executemany(
+            "INSERT INTO footprint_property (footprint_id, key, value) VALUES (?, ?, ?)",
+            [(footprint_id, p.key, p.value) for p in properties],
         )
 
 

@@ -139,6 +139,7 @@ def crawl_and_index(
             footprint.library_id = library_id
             try:
                 db.insert_footprint(conn, footprint)
+                db.insert_footprint_properties(conn, footprint.id, footprint.extra_properties)
                 if footprint.solid is not None:
                     footprint.solid.footprint_id = footprint.id
                     db.insert_solid(conn, footprint.solid)
