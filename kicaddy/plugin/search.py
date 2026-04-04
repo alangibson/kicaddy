@@ -15,6 +15,17 @@ class SearchResult:
     extra2: str        # Footprint string for symbols; Layer for footprints
 
 
+@dataclass
+class PartResult:
+    symbol_library: str
+    symbol_name: str    # kicad_library_id if set, else symbol.name
+    footprint: str      # kicad_footprint_id
+    description: str
+    mpn: str
+    model_path: str = ""  # resolved absolute path to STEP file, empty if none
+    svg_path: str = ""    # absolute path to cached SVG render, empty if not rendered
+
+
 # Search all text columns in symbol + symbol_property, and footprint + footprint_property.
 # Each branch uses the same pattern for every ? placeholder.
 # Symbol branch: 15 column checks + 2 for EXISTS on symbol_property  = 17 params
@@ -26,9 +37,10 @@ SELECT
     CASE WHEN s.kicad_library_id != '' THEN s.kicad_library_id
          ELSE s.name END                                               AS name,
     s.description,
-    s.mpn                                                              AS extra1,
+    COALESCE(p.mpn, '')                                                AS extra1,
     s.footprint                                                        AS extra2
 FROM symbol s
+LEFT JOIN part p ON p.symbol_id = s.id
 WHERE s.name             REGEXP ?
    OR s.extends          REGEXP ?
    OR s.kicad_library_id REGEXP ?
@@ -59,7 +71,7 @@ SELECT
          ELSE '' END                                                   AS library,
     f.name,
     f.description,
-    f.tags                                                             AS extra1,
+    ''                                                                 AS extra1,
     f.layer                                                            AS extra2
 FROM footprint f
 WHERE f.name               REGEXP ?
@@ -75,6 +87,65 @@ WHERE f.name               REGEXP ?
    )
 
 ORDER BY result_type, library, name
+LIMIT 500
+"""
+
+
+_SYMBOL_IDS_SQL = """
+SELECT s.id FROM symbol s
+WHERE s.name             REGEXP ?
+   OR s.extends          REGEXP ?
+   OR s.kicad_library_id REGEXP ?
+   OR s.reference        REGEXP ?
+   OR s.value            REGEXP ?
+   OR s.footprint        REGEXP ?
+   OR s.datasheet        REGEXP ?
+   OR s.description      REGEXP ?
+   OR s.keywords         REGEXP ?
+   OR s.mpn              REGEXP ?
+   OR s.manufacturer     REGEXP ?
+   OR s.package          REGEXP ?
+   OR s.mounting         REGEXP ?
+   OR s.category         REGEXP ?
+   OR s.library_name     REGEXP ?
+   OR EXISTS (
+       SELECT 1 FROM symbol_property sp
+       WHERE sp.symbol_id = s.id
+         AND (sp.key REGEXP ? OR sp.value REGEXP ?)
+   )
+"""
+
+_FOOTPRINT_IDS_SQL = """
+SELECT f.id FROM footprint f
+WHERE f.name               REGEXP ?
+   OR f.description        REGEXP ?
+   OR f.tags               REGEXP ?
+   OR f.layer              REGEXP ?
+   OR f.kicad_footprint_id REGEXP ?
+   OR f.file_path          REGEXP ?
+   OR EXISTS (
+       SELECT 1 FROM footprint_property fp
+       WHERE fp.footprint_id = f.id
+         AND (fp.key REGEXP ? OR fp.value REGEXP ?)
+   )
+"""
+
+_PARTS_BY_IDS_SQL = """
+SELECT DISTINCT
+    s.library_name                                                      AS symbol_library,
+    CASE WHEN s.kicad_library_id != '' THEN s.kicad_library_id
+         ELSE s.name END                                                AS symbol_name,
+    f.kicad_footprint_id                                                AS footprint,
+    s.description,
+    COALESCE(p.mpn, '')                                                 AS mpn,
+    COALESCE(sol.model_path, '')                                        AS model_path,
+    COALESCE(sol.svg_path, '')                                          AS svg_path
+FROM part p
+JOIN symbol s ON s.id = p.symbol_id
+JOIN footprint f ON f.id = p.footprint_id
+LEFT JOIN solid sol ON sol.footprint_id = f.id
+WHERE {where}
+ORDER BY symbol_library, symbol_name
 LIMIT 500
 """
 
@@ -124,6 +195,62 @@ def run_search(db_path: str, pattern: str) -> list[SearchResult]:
             description=row[3] or "",
             extra1=row[4] or "",
             extra2=row[5] or "",
+        )
+        for row in rows
+    ]
+
+
+def search_parts(db_path: str, pattern: str) -> list[PartResult]:
+    """Return parts linked to any symbol or footprint matching pattern.
+
+    Fetches matching symbol IDs and footprint IDs separately, then looks up
+    part rows that reference either set.
+
+    Raises ValueError on an invalid regex pattern or database error.
+    Returns up to 500 PartResult objects, ordered by symbol_library, symbol_name.
+    """
+    try:
+        re.compile(pattern)
+    except re.error as exc:
+        raise ValueError(f"Invalid regular expression: {exc}") from exc
+
+    try:
+        conn = _make_connection(db_path)
+    except Exception as exc:
+        raise ValueError(f"Cannot open database: {exc}") from exc
+
+    try:
+        symbol_ids = [r[0] for r in conn.execute(_SYMBOL_IDS_SQL, (pattern,) * 17).fetchall()]
+        footprint_ids = [r[0] for r in conn.execute(_FOOTPRINT_IDS_SQL, (pattern,) * 8).fetchall()]
+
+        if not symbol_ids and not footprint_ids:
+            return []
+
+        conditions = []
+        params: list = []
+        if symbol_ids:
+            conditions.append(f"p.symbol_id IN ({','.join('?' * len(symbol_ids))})")
+            params.extend(symbol_ids)
+        if footprint_ids:
+            conditions.append(f"p.footprint_id IN ({','.join('?' * len(footprint_ids))})")
+            params.extend(footprint_ids)
+
+        sql = _PARTS_BY_IDS_SQL.format(where=" OR ".join(conditions))
+        rows = conn.execute(sql, params).fetchall()
+    except sqlite3.OperationalError as exc:
+        raise ValueError(f"Database query failed: {exc}") from exc
+    finally:
+        conn.close()
+
+    return [
+        PartResult(
+            symbol_library=row[0] or "",
+            symbol_name=row[1] or "",
+            footprint=row[2] or "",
+            description=row[3] or "",
+            mpn=row[4] or "",
+            model_path=row[5] or "",
+            svg_path=row[6] or "",
         )
         for row in rows
     ]

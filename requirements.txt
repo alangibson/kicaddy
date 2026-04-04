@@ -1,0 +1,10 @@
+# Core
+kicad-sym
+
+# 3D rendering (for Parts tab STEP preview)
+cadquery
+
+# wxPython (for KiCad plugin UI)
+wxPython
+
+# Note: pcbnew is provided by KiCad itself and is not pip-installable
