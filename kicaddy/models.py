@@ -38,6 +38,30 @@ STANDARD_PROPERTY_KEYS: frozenset[str] = frozenset({
     "package",
     "Package/Case",
     "Package / Case",
+    # Digi-Key aliases
+    "Digikey",
+    "DigiKey",
+    "Digi-Key",
+    "digikey",
+    "DIGIKEY",
+    "Digikey_PN",
+    "DigiKey_PN",
+    # Mouser aliases
+    "Mouser",
+    "mouser",
+    "MOUSER",
+    "Mouser_PN",
+    "Mouser PN",
+    # TME aliases
+    "TME",
+    "tme",
+    "TME_PN",
+    # LCSC aliases
+    "LCSC",
+    "lcsc",
+    "LCSC_PN",
+    "LCSC Part",
+    "LCSC Part Number",
 })
 
 
@@ -114,6 +138,10 @@ class Symbol:
     mpn: str | None = None     # Manufacturer Part Number
     manufacturer: str | None = None  # Manufacturer name
     package: str | None = None  # Package/footprint name (e.g. "SOT-23", "R_0402_1005Metric")
+    digikey_pn: str | None = None    # Digi-Key part number
+    mouser_pn: str | None = None     # Mouser part number
+    tme_pn: str | None = None        # TME part number
+    lcsc_pn: str | None = None       # LCSC part number
     # Derived from library file path and footprint string
     mounting: str | None = None  # "SMD", "THT", or None
     category: str | None = None  # First segment of library name (e.g. "Resistor", "MCU")

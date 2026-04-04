@@ -45,6 +45,10 @@ def _expand_model_path(raw: str, mod_file: Path) -> str:
 _MPN_KEYS = ("MPN", "mpn", "Part Number", "PartNumber", "Part_Number", "PART_NUMBER")
 _MANUFACTURER_KEYS = ("Manufacturer", "MFR", "Mfr", "manufacturer", "MANUFACTURER")
 _PACKAGE_PROP_KEYS = ("Package", "package", "Package/Case", "Package / Case")
+_DIGIKEY_KEYS = ("Digikey", "DigiKey", "Digi-Key", "digikey", "DIGIKEY", "Digikey_PN", "DigiKey_PN")
+_MOUSER_KEYS  = ("Mouser", "mouser", "MOUSER", "Mouser_PN", "Mouser PN")
+_TME_KEYS     = ("TME", "tme", "TME_PN")
+_LCSC_KEYS    = ("LCSC", "lcsc", "LCSC_PN", "LCSC Part", "LCSC Part Number")
 
 # Library name prefixes / patterns that unambiguously indicate SMD packages
 _SMD_FOOTPRINT_LIBS = frozenset({
@@ -238,6 +242,10 @@ def _extract_symbol(
         mpn=_first(props, _MPN_KEYS),
         manufacturer=_first(props, _MANUFACTURER_KEYS),
         package=package,
+        digikey_pn=_first(props, _DIGIKEY_KEYS),
+        mouser_pn=_first(props, _MOUSER_KEYS),
+        tme_pn=_first(props, _TME_KEYS),
+        lcsc_pn=_first(props, _LCSC_KEYS),
         mounting=_infer_mounting(footprint_str, library_name),
         category=library_name.split("_")[0] if library_name else None,
         library_name=library_name,

@@ -5,15 +5,20 @@ import wx
 import wx.svg
 
 from . import config
-from .search import PartResult, SearchResult, run_search, search_parts
+from .search import PartResult, SearchResult, run_search, search_parts, update_part_supplier_field
+from kicaddy.sym_writer import write_symbol_property
 
 # ListCtrl column definitions per tab: list of (header, width)
 _PART_COLUMNS = [
     ("Symbol Library", 140),
     ("Symbol",         200),
-    ("Footprint",      220),
-    ("Description",    220),
-    ("MPN",            120),
+    ("Footprint",      200),
+    ("Description",    200),
+    ("MPN",            110),
+    ("Digikey#",        90),
+    ("Mouser#",         90),
+    ("TME#",            80),
+    ("LCSC#",           80),
 ]
 
 _SYMBOL_COLUMNS = [
@@ -31,9 +36,31 @@ _FOOTPRINT_COLUMNS = [
     ("Layer",       120),
 ]
 
+# Columns (by index) in the Parts tab that support inline editing
+_EDITABLE_PART_COLS = frozenset({4, 5, 6, 7, 8})
+
+# Map column index → symbol table field name
+_COL_TO_FIELD: dict[int, str] = {
+    4: "mpn",
+    5: "digikey_pn",
+    6: "mouser_pn",
+    7: "tme_pn",
+    8: "lcsc_pn",
+}
+
 
 def _part_field(r: PartResult, col: int) -> str:
-    return (r.symbol_library, r.symbol_name, r.footprint, r.description, r.mpn)[col]
+    return (
+        r.symbol_library,
+        r.symbol_name,
+        r.footprint,
+        r.description,
+        r.mpn,
+        r.digikey_pn,
+        r.mouser_pn,
+        r.tme_pn,
+        r.lcsc_pn,
+    )[col]
 
 
 def _symbol_field(r: SearchResult, col: int) -> str:
@@ -113,9 +140,10 @@ class SearchDialog(wx.Dialog):
         super().__init__(
             parent,
             title="Kicaddy — Symbol & Footprint Search",
-            size=(1050, 600),
+            size=(1300, 600),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
         )
+        self._cell_editor: wx.TextCtrl | None = None
         self._build_ui()
         saved = config.get_db_path()
         if saved:
@@ -133,7 +161,7 @@ class SearchDialog(wx.Dialog):
         root.Add(self._make_notebook(), proportion=1, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=6)
         root.Add(self._make_status_row(), flag=wx.EXPAND | wx.ALL, border=6)
         self.SetSizerAndFit(root)
-        self.SetSize((1050, 600))
+        self.SetSize((1300, 600))
 
     def _make_db_row(self) -> wx.Sizer:
         sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -166,7 +194,7 @@ class SearchDialog(wx.Dialog):
         parts_splitter = wx.SplitterWindow(self._notebook, style=wx.SP_LIVE_UPDATE)
         self._parts_list = _ResultList(parts_splitter, _PART_COLUMNS, _part_field)
         self._preview_panel = _PreviewPanel(parts_splitter)
-        parts_splitter.SplitVertically(self._parts_list, self._preview_panel, sashPosition=780)
+        parts_splitter.SplitVertically(self._parts_list, self._preview_panel, sashPosition=1010)
         parts_splitter.SetMinimumPaneSize(200)
 
         self._symbols_list = _ResultList(self._notebook, _SYMBOL_COLUMNS, _symbol_field)
@@ -178,6 +206,7 @@ class SearchDialog(wx.Dialog):
 
         self._parts_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self._on_part_selected)
         self._parts_list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self._on_item_activated)
+        self._parts_list.Bind(wx.EVT_LEFT_DOWN, self._on_parts_left_down)
         for lst in (self._symbols_list, self._footprints_list):
             lst.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self._on_item_activated)
 
@@ -286,12 +315,148 @@ class SearchDialog(wx.Dialog):
             wx.TheClipboard.Close()
             self._set_status(f"Copied to clipboard: {text}", error=False)
 
+    def _on_parts_left_down(self, event: wx.MouseEvent) -> None:
+        event.Skip()  # allow normal row selection to proceed
+
+        x, y = event.GetPosition()
+        item, _flags = self._parts_list.HitTest(wx.Point(x, y))
+        if item < 0:
+            return
+
+        # Determine which column was clicked by accumulating widths
+        col_hit = -1
+        cumulative = 0
+        for col_idx in range(len(_PART_COLUMNS)):
+            cumulative += self._parts_list.GetColumnWidth(col_idx)
+            if x < cumulative:
+                col_hit = col_idx
+                break
+
+        if col_hit not in _EDITABLE_PART_COLS:
+            return
+
+        results = self._parts_list._results
+        if item >= len(results):
+            return
+        result = results[item]
+
+        # Check writability of the symbol's library file every time
+        abs_lib_path = self._resolve_library_path(result.library_path)
+        if not os.access(abs_lib_path, os.W_OK):
+            self._set_status(
+                f"Read-only library: {abs_lib_path} — cannot edit.",
+                error=True,
+            )
+            return
+
+        self._open_cell_editor(item, col_hit, result)
+
     def _on_close(self, _event: wx.Event) -> None:
         self.EndModal(wx.ID_CANCEL)
 
     # ------------------------------------------------------------------
+    # Inline cell editor
+    # ------------------------------------------------------------------
+
+    def _open_cell_editor(self, item: int, col: int, result: PartResult) -> None:
+        """Position a floating TextCtrl over the clicked cell."""
+        # Destroy any existing editor first
+        if self._cell_editor is not None:
+            self._cell_editor.Destroy()
+            self._cell_editor = None
+
+        row_rect = self._parts_list.GetItemRect(item)
+
+        # Calculate column left edge by accumulating widths
+        col_x = 0
+        for c in range(col):
+            col_x += self._parts_list.GetColumnWidth(c)
+        col_w = self._parts_list.GetColumnWidth(col)
+
+        # Convert list-client coordinates to dialog coordinates
+        cell_screen = self._parts_list.ClientToScreen(wx.Point(col_x, row_rect.y))
+        cell_pos = self.ScreenToClient(cell_screen)
+
+        current_value = _part_field(result, col)
+        editor = wx.TextCtrl(
+            self,
+            value=current_value,
+            pos=cell_pos,
+            size=wx.Size(col_w, row_rect.height),
+            style=wx.TE_PROCESS_ENTER | wx.BORDER_SIMPLE,
+        )
+        editor.SetFocus()
+        editor.SelectAll()
+
+        # Attach edit context as attributes for use in commit handler
+        editor._edit_item = item
+        editor._edit_col = col
+        editor._edit_result = result
+        editor._edit_field = _COL_TO_FIELD[col]
+
+        editor.Bind(wx.EVT_TEXT_ENTER, self._on_cell_editor_commit)
+        editor.Bind(wx.EVT_KILL_FOCUS, self._on_cell_editor_commit)
+        editor.Bind(wx.EVT_KEY_DOWN, self._on_cell_editor_key)
+
+        self._cell_editor = editor
+
+    def _on_cell_editor_key(self, event: wx.KeyEvent) -> None:
+        if event.GetKeyCode() == wx.WXK_ESCAPE:
+            if self._cell_editor is not None:
+                self._cell_editor.Destroy()
+                self._cell_editor = None
+            return
+        event.Skip()
+
+    def _on_cell_editor_commit(self, event: wx.Event) -> None:
+        # Guard against re-entrancy: EVT_KILL_FOCUS fires again when Destroy() is called
+        editor = self._cell_editor
+        if editor is None:
+            return
+        self._cell_editor = None  # clear before Destroy to prevent re-entry
+
+        new_value = editor.GetValue().strip()
+        item       = editor._edit_item
+        col        = editor._edit_col
+        result     = editor._edit_result
+        field_name = editor._edit_field
+        editor.Destroy()
+
+        db_path = self._db_path_input.GetValue().strip()
+        abs_lib_path = self._resolve_library_path(result.library_path)
+
+        # Write to database
+        try:
+            update_part_supplier_field(db_path, result.symbol_id, field_name, new_value)
+        except ValueError as exc:
+            self._set_status(str(exc), error=True)
+            return
+
+        # Write to .kicad_sym file (backs up to .bak first)
+        try:
+            write_symbol_property(abs_lib_path, result.symbol_raw_name, field_name, new_value)
+        except Exception as exc:
+            self._set_status(f"DB saved, but file write failed: {exc}", error=True)
+            return
+
+        # Update in-memory result so the list reflects the change immediately
+        setattr(result, field_name, new_value)
+        self._parts_list.RefreshItem(item)
+        self._set_status(
+            f"Saved {field_name} = {new_value!r} for {result.symbol_name}.",
+            error=False,
+        )
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _resolve_library_path(self, library_path: str) -> str:
+        """Resolve a possibly-relative library_path against the DB file's directory."""
+        if os.path.isabs(library_path):
+            return library_path
+        db_dir = os.path.dirname(self._db_path_input.GetValue().strip())
+        return os.path.normpath(os.path.join(db_dir, library_path))
 
     def _set_status(self, message: str, *, error: bool) -> None:
         self._status_label.SetForegroundColour(

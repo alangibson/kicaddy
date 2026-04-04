@@ -53,6 +53,10 @@ CREATE TABLE IF NOT EXISTS symbol (
     mpn              TEXT,
     manufacturer     TEXT,
     package          TEXT,
+    digikey_pn       TEXT,
+    mouser_pn        TEXT,
+    tme_pn           TEXT,
+    lcsc_pn          TEXT,
     mounting         TEXT,
     category         TEXT,
     library_name     TEXT    NOT NULL DEFAULT '',
@@ -104,6 +108,24 @@ CREATE INDEX IF NOT EXISTS idx_part_footprint_id
 """
 
 
+_MIGRATIONS = [
+    "ALTER TABLE symbol ADD COLUMN digikey_pn TEXT",
+    "ALTER TABLE symbol ADD COLUMN mouser_pn   TEXT",
+    "ALTER TABLE symbol ADD COLUMN tme_pn      TEXT",
+    "ALTER TABLE symbol ADD COLUMN lcsc_pn     TEXT",
+]
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    """Run forward-only schema migrations. Silently skips already-applied ones."""
+    for sql in _MIGRATIONS:
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError:
+            pass  # column already exists
+    conn.commit()
+
+
 def get_connection(db_path: str) -> sqlite3.Connection:
     """Open a SQLite connection with WAL journal mode and foreign keys enabled."""
     conn = sqlite3.connect(db_path)
@@ -116,6 +138,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
     """Execute all CREATE TABLE / CREATE INDEX DDL statements."""
     conn.executescript(_DDL)
     conn.commit()
+    _apply_migrations(conn)
 
 
 def upsert_library(conn: sqlite3.Connection, lib: Library) -> int:
@@ -163,8 +186,9 @@ def insert_symbol(conn: sqlite3.Connection, symbol: Symbol) -> int:
         INSERT INTO symbol
             (library_id, name, extends, kicad_library_id, unit_id,
              reference, value, footprint, datasheet, description, keywords,
-             mpn, manufacturer, package, mounting, category, library_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             mpn, manufacturer, package, digikey_pn, mouser_pn, tme_pn, lcsc_pn,
+             mounting, category, library_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(library_id, name) DO UPDATE SET
             extends          = excluded.extends,
             kicad_library_id = excluded.kicad_library_id,
@@ -178,6 +202,18 @@ def insert_symbol(conn: sqlite3.Connection, symbol: Symbol) -> int:
             mpn              = excluded.mpn,
             manufacturer     = excluded.manufacturer,
             package          = excluded.package,
+            digikey_pn       = CASE WHEN excluded.digikey_pn IS NOT NULL
+                                    THEN excluded.digikey_pn
+                                    ELSE symbol.digikey_pn END,
+            mouser_pn        = CASE WHEN excluded.mouser_pn IS NOT NULL
+                                    THEN excluded.mouser_pn
+                                    ELSE symbol.mouser_pn END,
+            tme_pn           = CASE WHEN excluded.tme_pn IS NOT NULL
+                                    THEN excluded.tme_pn
+                                    ELSE symbol.tme_pn END,
+            lcsc_pn          = CASE WHEN excluded.lcsc_pn IS NOT NULL
+                                    THEN excluded.lcsc_pn
+                                    ELSE symbol.lcsc_pn END,
             mounting         = excluded.mounting,
             category         = excluded.category,
             library_name     = excluded.library_name
@@ -198,6 +234,10 @@ def insert_symbol(conn: sqlite3.Connection, symbol: Symbol) -> int:
             symbol.mpn,
             symbol.manufacturer,
             symbol.package,
+            symbol.digikey_pn,
+            symbol.mouser_pn,
+            symbol.tme_pn,
+            symbol.lcsc_pn,
             symbol.mounting,
             symbol.category,
             symbol.library_name,
@@ -311,6 +351,29 @@ def link_symbols_to_footprints(conn: sqlite3.Connection) -> None:
         WHERE symbol.footprint != ''
         """
     )
+
+
+def update_symbol_supplier_field(
+    conn: sqlite3.Connection,
+    symbol_id: int,
+    field_name: str,
+    value: str,
+) -> None:
+    """Update a single supplier/MPN field on a symbol row.
+
+    field_name must be one of: 'mpn', 'digikey_pn', 'mouser_pn', 'tme_pn', 'lcsc_pn'.
+    Stores empty string as NULL.
+    Raises ValueError for unknown field names.
+    """
+    allowed = frozenset({"mpn", "digikey_pn", "mouser_pn", "tme_pn", "lcsc_pn"})
+    if field_name not in allowed:
+        raise ValueError(f"Unknown supplier field: {field_name!r}")
+    stored_value = value.strip() or None
+    conn.execute(
+        f"UPDATE symbol SET {field_name} = ? WHERE id = ?",  # noqa: S608 — field_name validated above
+        (stored_value, symbol_id),
+    )
+    conn.commit()
 
 
 def insert_parts_from_links(conn: sqlite3.Connection) -> int:
