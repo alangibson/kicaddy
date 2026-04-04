@@ -3,18 +3,6 @@
 Crawls directories of KiCad s-expression symbol libraries (`.kicad_sym`) and
 footprint libraries (`.pretty`) and indexes them into a SQLite database.
 
-## Setup
-
-```bash
-pip install -e .          # installs kicad-sym dependency
-```
-
-## Usage
-
-```bash
-python main.py /path/to/symbols [/more/dirs] --db kicaddy.db --log-level INFO
-```
-
 ## Module Layout
 
 ```
@@ -30,67 +18,6 @@ kicaddy/
                  #   crawl_and_index(), CrawlStats
 main.py          # CLI entry point (argparse)
 ```
-
-## Database Schema
-
-### `library`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | INTEGER PK | |
-| `library_path` | TEXT UNIQUE | relative path to `.kicad_sym` file or `.pretty` dir |
-| `library_type` | TEXT | `"symbol"` or `"footprint"` (LibraryType enum) |
-| `version` | INTEGER | e.g. `20241209`; `0` for footprint libraries |
-| `generator` | TEXT | e.g. `"kicad_symbol_editor"`; `""` for footprint libraries |
-| `generator_version` | TEXT | e.g. `"9.0"` |
-
-### `symbol`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | INTEGER PK | |
-| `library_id` | INTEGER FK | → `library.id` ON DELETE CASCADE |
-| `name` | TEXT | symbol name within the library |
-| `extends` | TEXT | parent symbol name, or `""` |
-| `kicad_library_id` | TEXT | KiCad `LIBRARY_ID` property (e.g. `"Device:R"`) |
-| `unit_id` | TEXT | KiCad `UNIT_ID` property |
-| `reference` | TEXT | |
-| `value` | TEXT | |
-| `footprint` | TEXT | raw footprint string, e.g. `"Resistor_SMD:R_0402_1005Metric"` |
-| `datasheet` | TEXT | |
-| `description` | TEXT | from `ki_description` |
-| `keywords` | TEXT | from `ki_keywords` |
-| `footprint_id` | INTEGER FK | → `footprint.id` (nullable; populated by linking pass) |
-
-### `symbol_property`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | INTEGER PK | |
-| `symbol_id` | INTEGER FK | → `symbol.id` ON DELETE CASCADE |
-| `key` | TEXT | |
-| `value` | TEXT | |
-
-### `footprint`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | INTEGER PK | |
-| `library_id` | INTEGER FK | → `library.id` ON DELETE CASCADE |
-| `name` | TEXT | stem of `.kicad_mod` filename |
-| `description` | TEXT | from `(descr "...")` |
-| `tags` | TEXT | from `(tags "...")` |
-| `layer` | TEXT | primary layer, from `(layer "...")` |
-| `kicad_footprint_id` | TEXT | `"LibraryName:FootprintName"` (used for linking) |
-
-### `part`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | INTEGER PK | |
-| `symbol_id` | INTEGER FK | → `symbol.id` ON DELETE CASCADE |
-| `footprint_id` | INTEGER FK | → `footprint.id` ON DELETE CASCADE |
-
-## Packaging
-
-`pyproject.toml` uses `build-backend = "setuptools.build_meta"` — the standard
-modern setuptools backend. Do not use `setuptools.backends.legacy:build`; that
-path does not exist in current setuptools and raises `BackendUnavailable`.
 
 ## Key Design Notes
 

@@ -69,7 +69,8 @@ class FootprintProperty:
 
 @dataclass
 class Solid:
-    model_path: str              # relative path as stored in the .kicad_mod file
+    model_path: str              # fully resolved absolute path to the 3D model file
+    svg_path: str = ""           # absolute path to cached SVG render in ~/3dmodel.cache/
     footprint_id: int | None = None
     id: int | None = None
 
@@ -92,6 +93,7 @@ class Footprint:
 class Part:
     symbol_id: int    # FK → symbol.id
     footprint_id: int # FK → footprint.id
+    mpn: str = ''
     id: int | None = None
 
 
@@ -99,9 +101,9 @@ class Part:
 class Symbol:
     library_id: int             # FK → library.id
     name: str
-    extends: str                # parent symbol name if this extends another, else ""
+    extends: str | None         # parent symbol name if this extends another, else None
     kicad_library_id: str       # KiCad "LIBRARY_ID" property, e.g. "Device:R"
-    unit_id: str                # KiCad "UNIT_ID" property, e.g. "1"
+    unit_id: str | None         # KiCad "UNIT_ID" property, e.g. "1"
     reference: str
     value: str
     footprint: str
@@ -109,12 +111,12 @@ class Symbol:
     description: str            # from ki_description
     keywords: str               # from ki_keywords
     # Extracted from symbol properties (with alias resolution)
-    mpn: str = ""              # Manufacturer Part Number
-    manufacturer: str = ""    # Manufacturer name
-    package: str = ""         # Package/footprint name (e.g. "SOT-23", "R_0402_1005Metric")
+    mpn: str | None = None     # Manufacturer Part Number
+    manufacturer: str | None = None  # Manufacturer name
+    package: str | None = None  # Package/footprint name (e.g. "SOT-23", "R_0402_1005Metric")
     # Derived from library file path and footprint string
-    mounting: str = ""        # "SMD", "THT", or ""
-    category: str = ""        # First segment of library name (e.g. "Resistor", "MCU")
+    mounting: str | None = None  # "SMD", "THT", or None
+    category: str | None = None  # First segment of library name (e.g. "Resistor", "MCU")
     library_name: str = ""    # Stem of .kicad_sym file (e.g. "Resistor_SMD")
     extra_properties: list[SymbolProperty] = field(default_factory=list)
     id: int | None = None

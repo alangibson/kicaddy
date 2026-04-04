@@ -66,7 +66,8 @@ def main() -> None:
         f"files={stats.files_found} (failed={stats.files_failed})  "
         f"symbols={stats.symbols_indexed} (failed={stats.symbols_failed})  "
         f"footprint_libs={stats.footprint_libs_found} (failed={stats.footprint_libs_failed})  "
-        f"footprints={stats.footprints_indexed} (failed={stats.footprints_failed})"
+        f"footprints={stats.footprints_indexed} (failed={stats.footprints_failed})  "
+        f"parts={stats.parts_created}"
     )
 
 

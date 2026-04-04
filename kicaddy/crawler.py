@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
-from kicaddy import db, parser
+from kicaddy import db, parser, render
 from kicaddy.models import LibraryType
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ class CrawlStats:
     footprint_libs_failed: int = 0
     footprints_indexed: int = 0
     footprints_failed: int = 0
+    parts_created: int = 0
 
 
 def find_kicad_pretty_dirs(directories: list[Path]) -> Iterator[tuple[Path, str]]:
@@ -142,6 +144,8 @@ def crawl_and_index(
                 db.insert_footprint_properties(conn, footprint.id, footprint.extra_properties)
                 if footprint.solid is not None:
                     footprint.solid.footprint_id = footprint.id
+                    model_path = footprint.solid.model_path
+                    footprint.solid.svg_path = render.render_step_to_svg(model_path) or ""
                     db.insert_solid(conn, footprint.solid)
                 stats.footprints_indexed += 1
                 pending_commits += 1
@@ -163,7 +167,7 @@ def crawl_and_index(
 
     # Phase 3: link symbol.footprint_id → footprint.id, then populate part table
     db.link_symbols_to_footprints(conn)
-    db.insert_parts_from_links(conn)
+    stats.parts_created = db.insert_parts_from_links(conn)
     conn.commit()
 
     return stats

@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS footprint (
 CREATE TABLE IF NOT EXISTS solid (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     footprint_id INTEGER NOT NULL UNIQUE REFERENCES footprint(id) ON DELETE CASCADE,
-    model_path   TEXT    NOT NULL DEFAULT ''
+    model_path   TEXT    NOT NULL DEFAULT '',
+    svg_path     TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_solid_footprint_id
@@ -38,22 +39,22 @@ CREATE INDEX IF NOT EXISTS idx_solid_footprint_id
 CREATE TABLE IF NOT EXISTS symbol (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     library_id       INTEGER NOT NULL REFERENCES library(id) ON DELETE CASCADE,
+    footprint_id     INTEGER REFERENCES footprint(id),
     name             TEXT    NOT NULL,
-    extends          TEXT    NOT NULL DEFAULT '',
-    kicad_library_id TEXT    NOT NULL DEFAULT '',
-    unit_id          TEXT    NOT NULL DEFAULT '',
-    reference        TEXT    NOT NULL DEFAULT '',
-    value            TEXT    NOT NULL DEFAULT '',
+    extends          TEXT,
+    kicad_library_id TEXT    NOT NULL,
+    unit_id          TEXT,
+    reference        TEXT    NOT NULL,
+    value            TEXT    NOT NULL,
     footprint        TEXT    NOT NULL DEFAULT '',
     datasheet        TEXT    NOT NULL DEFAULT '',
     description      TEXT    NOT NULL DEFAULT '',
     keywords         TEXT    NOT NULL DEFAULT '',
-    footprint_id     INTEGER REFERENCES footprint(id),
-    mpn              TEXT    NOT NULL DEFAULT '',
-    manufacturer     TEXT    NOT NULL DEFAULT '',
-    package          TEXT    NOT NULL DEFAULT '',
-    mounting         TEXT    NOT NULL DEFAULT '',
-    category         TEXT    NOT NULL DEFAULT '',
+    mpn              TEXT,
+    manufacturer     TEXT,
+    package          TEXT,
+    mounting         TEXT,
+    category         TEXT,
     library_name     TEXT    NOT NULL DEFAULT '',
     UNIQUE (library_id, name)
 );
@@ -91,6 +92,7 @@ CREATE TABLE IF NOT EXISTS part (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol_id    INTEGER NOT NULL REFERENCES symbol(id) ON DELETE CASCADE,
     footprint_id INTEGER NOT NULL REFERENCES footprint(id) ON DELETE CASCADE,
+    mpn          TEXT    NOT NULL DEFAULT '',
     UNIQUE (symbol_id, footprint_id)
 );
 
@@ -114,47 +116,6 @@ def create_schema(conn: sqlite3.Connection) -> None:
     """Execute all CREATE TABLE / CREATE INDEX DDL statements."""
     conn.executescript(_DDL)
     conn.commit()
-    # Migrate existing databases that predate the footprint_id column.
-    try:
-        conn.execute("ALTER TABLE symbol ADD COLUMN footprint_id INTEGER REFERENCES footprint(id)")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass  # column already exists
-    try:
-        conn.execute("ALTER TABLE footprint ADD COLUMN file_path TEXT NOT NULL DEFAULT ''")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass  # column already exists
-    # Migrate existing databases that predate the footprint_property table.
-    try:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS footprint_property ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "footprint_id INTEGER NOT NULL REFERENCES footprint(id) ON DELETE CASCADE, "
-            "key TEXT NOT NULL, "
-            "value TEXT NOT NULL DEFAULT '')"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_footprint_property_footprint_id "
-            "ON footprint_property(footprint_id)"
-        )
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass  # table already exists
-    for col_def in (
-        "mpn          TEXT NOT NULL DEFAULT ''",
-        "manufacturer TEXT NOT NULL DEFAULT ''",
-        "package      TEXT NOT NULL DEFAULT ''",
-        "mounting     TEXT NOT NULL DEFAULT ''",
-        "category     TEXT NOT NULL DEFAULT ''",
-        "library_name TEXT NOT NULL DEFAULT ''",
-    ):
-        col_name = col_def.split()[0]
-        try:
-            conn.execute(f"ALTER TABLE symbol ADD COLUMN {col_def}")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass  # column already exists
 
 
 def upsert_library(conn: sqlite3.Connection, lib: Library) -> int:
@@ -321,13 +282,14 @@ def insert_solid(conn: sqlite3.Connection, model: Solid) -> int:
     """
     cur = conn.execute(
         """
-        INSERT INTO solid (footprint_id, model_path)
-        VALUES (?, ?)
+        INSERT INTO solid (footprint_id, model_path, svg_path)
+        VALUES (?, ?, ?)
         ON CONFLICT(footprint_id) DO UPDATE SET
-            model_path = excluded.model_path
+            model_path = excluded.model_path,
+            svg_path   = excluded.svg_path
         RETURNING id
         """,
-        (model.footprint_id, model.model_path),
+        (model.footprint_id, model.model_path, model.svg_path),
     )
     row = cur.fetchone()
     model.id = row[0]
@@ -351,17 +313,20 @@ def link_symbols_to_footprints(conn: sqlite3.Connection) -> None:
     )
 
 
-def insert_parts_from_links(conn: sqlite3.Connection) -> None:
+def insert_parts_from_links(conn: sqlite3.Connection) -> int:
     """
     Populate the part table from existing symbol→footprint links.
+    Only symbols with both a matched footprint and a non-empty MPN produce a part.
     Must be called after link_symbols_to_footprints().
     Uses INSERT OR IGNORE for idempotency.
     """
-    conn.execute(
+    cur = conn.execute(
         """
-        INSERT OR IGNORE INTO part (symbol_id, footprint_id)
-        SELECT id, footprint_id
+        INSERT INTO part (symbol_id, footprint_id, mpn)
+        SELECT id, footprint_id, mpn
         FROM symbol
         WHERE footprint_id IS NOT NULL
+          AND mpn IS NOT NULL
         """
     )
+    return cur.rowcount
