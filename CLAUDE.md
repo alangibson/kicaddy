@@ -16,7 +16,7 @@ kicaddy/
                  # parse_footprint_library_dir() — extracts Library + Footprints from .pretty dir
     crawler.py   # find_kicad_sym_files(), find_kicad_pretty_dirs(),
                  #   crawl_and_index(), CrawlStats
-main.py          # CLI entry point (argparse)
+    index.py     # CLI entry point (argparse) — run with: python -m kicaddy.index
 ```
 
 ## Key Design Notes
@@ -47,3 +47,8 @@ main.py          # CLI entry point (argparse)
   so existing databases are upgraded transparently.
 - **Crawl phases**: (1) index symbol libraries, (2) index footprint libraries,
   (3) link symbols to footprints, (4) populate part table.
+
+## Documentation
+
+- Always keep `README.md` up to date when making changes that affect usage,
+  CLI commands, or module layout.

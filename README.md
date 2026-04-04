@@ -18,7 +18,7 @@ pip install -e .
 ## Usage
 
 ```bash
-python main.py <DIR> [DIR ...] [--db PATH] [--log-level LEVEL]
+python -m kicaddy.index <DIR> [DIR ...] [--db PATH] [--log-level LEVEL]
 ```
 
 **Arguments**
@@ -32,7 +32,7 @@ python main.py <DIR> [DIR ...] [--db PATH] [--log-level LEVEL]
 **Example**
 
 ```bash
-python main.py ~/kicad/symbols /my/custom-libs --db index.db
+python -m kicaddy.index ~/kicad/symbols /my/custom-libs --db index.db
 ```
 
 ## Kicaddy Plugin
