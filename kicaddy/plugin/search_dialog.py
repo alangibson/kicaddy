@@ -27,7 +27,6 @@ _SYMBOL_COLUMNS = [
     ("Library",     160),
     ("Name",        220),
     ("Description", 260),
-    ("MPN",         120),
     ("Footprint",   180),
 ]
 
@@ -66,7 +65,7 @@ def _part_field(r: PartResult, col: int) -> str:
 
 
 def _symbol_field(r: SearchResult, col: int) -> str:
-    return (r.library, r.name, r.description, r.extra1, r.extra2)[col]
+    return (r.library, r.name, r.description, r.extra2)[col]
 
 
 def _footprint_field(r: SearchResult, col: int) -> str:

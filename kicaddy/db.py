@@ -363,17 +363,16 @@ def update_symbol_supplier_field(
 def insert_parts_from_links(conn: sqlite3.Connection) -> int:
     """
     Populate the part table from existing symbol→footprint links.
-    Only symbols with both a matched footprint and a non-empty MPN produce a part.
+    Any symbol with a matched footprint produces a part, regardless of MPN.
     Must be called after link_symbols_to_footprints().
     Uses INSERT OR IGNORE for idempotency.
     """
     cur = conn.execute(
         """
         INSERT OR IGNORE INTO part (symbol_id, footprint_id, mpn)
-        SELECT id, footprint_id, mpn
+        SELECT id, footprint_id, COALESCE(mpn, '')
         FROM symbol
         WHERE footprint_id IS NOT NULL
-          AND mpn IS NOT NULL
         """
     )
     return cur.rowcount

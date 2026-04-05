@@ -44,10 +44,9 @@ SELECT
     CASE WHEN s.kicad_library_id != '' THEN s.kicad_library_id
          ELSE s.name END                                               AS name,
     s.description,
-    COALESCE(p.mpn, '')                                                AS extra1,
+    ''                                                                 AS extra1,
     s.footprint                                                        AS extra2
 FROM symbol s
-LEFT JOIN part p ON p.symbol_id = s.id
 WHERE s.name             REGEXP ?
    OR s.extends          REGEXP ?
    OR s.kicad_library_id REGEXP ?
