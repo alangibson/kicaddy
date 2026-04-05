@@ -143,7 +143,7 @@ SELECT DISTINCT
          ELSE s.name END                                                AS symbol_name,
     f.kicad_footprint_id                                                AS footprint,
     s.description,
-    COALESCE(p.mpn, '')                                                 AS mpn,
+    COALESCE(s.mpn, '')                                                 AS mpn,
     COALESCE(sol.model_path, '')                                        AS model_path,
     COALESCE(sol.svg_path, '')                                          AS svg_path,
     s.id                                                                AS symbol_id,

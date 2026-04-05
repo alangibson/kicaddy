@@ -97,7 +97,6 @@ CREATE TABLE IF NOT EXISTS part (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol_id    INTEGER NOT NULL REFERENCES symbol(id) ON DELETE CASCADE,
     footprint_id INTEGER NOT NULL REFERENCES footprint(id) ON DELETE CASCADE,
-    mpn          TEXT    NOT NULL DEFAULT '',
     UNIQUE (symbol_id, footprint_id)
 );
 
@@ -120,6 +119,11 @@ def get_connection(db_path: str) -> sqlite3.Connection:
 def create_schema(conn: sqlite3.Connection) -> None:
     """Execute all CREATE TABLE / CREATE INDEX DDL statements."""
     conn.executescript(_DDL)
+    # Migrations: drop columns removed from the schema (SQLite 3.35+)
+    try:
+        conn.execute("ALTER TABLE part DROP COLUMN mpn")
+    except Exception:
+        pass
     conn.commit()
 
 
@@ -369,8 +373,8 @@ def insert_parts_from_links(conn: sqlite3.Connection) -> int:
     """
     cur = conn.execute(
         """
-        INSERT OR IGNORE INTO part (symbol_id, footprint_id, mpn)
-        SELECT id, footprint_id, COALESCE(mpn, '')
+        INSERT OR IGNORE INTO part (symbol_id, footprint_id)
+        SELECT id, footprint_id
         FROM symbol
         WHERE footprint_id IS NOT NULL
         """
