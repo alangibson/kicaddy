@@ -216,7 +216,7 @@ def crawl_from_lib_tables(
                         seen_fp.add(resolved)
                         fp_dirs.append(p)
         else:
-            logger.warning("Unknown lib table type %r in %s", table_type, table_path)
+            logger.debug("Skipping unsupported lib table type %r in %s", table_type, table_path)
 
     # Phase 1: index symbol libraries
     conn.execute("BEGIN")
