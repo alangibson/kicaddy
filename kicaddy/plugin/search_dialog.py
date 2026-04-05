@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import wx
 import wx.svg
 
@@ -120,6 +121,8 @@ class SearchDialog(wx.Dialog):
         saved = config.get_db_path()
         if saved:
             self._db_path_input.SetValue(saved)
+        for p in config.get_lib_tables():
+            self._lib_tables_list.Append(p)
         self._pattern_input.SetFocus()
 
     # ------------------------------------------------------------------
@@ -176,12 +179,45 @@ class SearchDialog(wx.Dialog):
         self._notebook.AddPage(self._symbols_list, "Symbols (0)")
         self._notebook.AddPage(self._footprints_list, "Footprints (0)")
 
+        self._notebook.AddPage(self._make_config_tab(), "Configuration")
+
         self._parts_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self._on_part_selected)
         self._parts_list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self._on_item_activated)
         for lst in (self._symbols_list, self._footprints_list):
             lst.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self._on_item_activated)
 
         return self._notebook
+
+    def _make_config_tab(self) -> wx.Panel:
+        panel = wx.Panel(self._notebook)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        sizer.Add(wx.StaticText(panel, label="Library Table Files:"), flag=wx.LEFT | wx.TOP, border=6)
+
+        self._lib_tables_list = wx.ListBox(panel, style=wx.LB_SINGLE)
+        sizer.Add(self._lib_tables_list, proportion=1, flag=wx.EXPAND | wx.ALL, border=6)
+
+        btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        add_btn = wx.Button(panel, label="Add\u2026")
+        remove_btn = wx.Button(panel, label="Remove")
+        add_btn.Bind(wx.EVT_BUTTON, self._on_lib_add)
+        remove_btn.Bind(wx.EVT_BUTTON, self._on_lib_remove)
+        btn_sizer.Add(add_btn, flag=wx.RIGHT, border=6)
+        btn_sizer.Add(remove_btn)
+        sizer.Add(btn_sizer, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=6)
+
+        sizer.Add(wx.StaticLine(panel), flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=6)
+
+        reindex_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self._reindex_btn = wx.Button(panel, label="Re-index")
+        self._reindex_btn.Bind(wx.EVT_BUTTON, self._on_reindex)
+        self._reindex_status = wx.StaticText(panel, label="")
+        reindex_sizer.Add(self._reindex_btn, flag=wx.RIGHT, border=8)
+        reindex_sizer.Add(self._reindex_status, flag=wx.ALIGN_CENTER_VERTICAL)
+        sizer.Add(reindex_sizer, flag=wx.ALL, border=6)
+
+        panel.SetSizer(sizer)
+        return panel
 
     def _make_status_row(self) -> wx.Sizer:
         sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -289,9 +325,66 @@ class SearchDialog(wx.Dialog):
     def _on_close(self, _event: wx.Event) -> None:
         self.EndModal(wx.ID_CANCEL)
 
+    def _on_lib_add(self, _event: wx.Event) -> None:
+        with wx.FileDialog(
+            self,
+            "Select a KiCad library table file",
+            wildcard="Library table files (*-lib-table)|*-lib-table|All files (*.*)|*.*",
+            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+        ) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                path = dlg.GetPath()
+                if self._lib_tables_list.FindString(path) == wx.NOT_FOUND:
+                    self._lib_tables_list.Append(path)
+                    config.set_lib_tables(list(self._lib_tables_list.GetItems()))
+
+    def _on_lib_remove(self, _event: wx.Event) -> None:
+        sel = self._lib_tables_list.GetSelection()
+        if sel != wx.NOT_FOUND:
+            self._lib_tables_list.Delete(sel)
+            config.set_lib_tables(list(self._lib_tables_list.GetItems()))
+
+    def _on_reindex(self, _event: wx.Event) -> None:
+        from kicaddy import db
+        from kicaddy.crawler import crawl_from_lib_tables
+
+        db_path = self._db_path_input.GetValue().strip()
+        if not db_path:
+            self._reindex_status.SetLabel("No database path set.")
+            return
+
+        table_paths = list(self._lib_tables_list.GetItems())
+        if not table_paths:
+            self._reindex_status.SetLabel("No library tables configured.")
+            return
+
+        self._reindex_btn.Disable()
+        self._reindex_status.SetLabel("Indexing\u2026")
+
+        def _run() -> None:
+            try:
+                conn = db.get_connection(db_path)
+                db.create_schema(conn)
+                stats = crawl_from_lib_tables(table_paths, conn)
+                conn.close()
+                msg = (
+                    f"Done. symbols={stats.symbols_indexed} "
+                    f"footprints={stats.footprints_indexed} "
+                    f"parts={stats.parts_created}"
+                )
+            except Exception as exc:
+                msg = f"Error: {exc}"
+            wx.CallAfter(self._reindex_done, msg)
+
+        threading.Thread(target=_run, daemon=True).start()
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _reindex_done(self, msg: str) -> None:
+        self._reindex_status.SetLabel(msg)
+        self._reindex_btn.Enable()
 
     def _set_status(self, message: str, *, error: bool) -> None:
         self._status_label.SetForegroundColour(

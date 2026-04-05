@@ -30,3 +30,22 @@ def set_db_path(path: str) -> None:
     cfg.set(_SECTION, "db_path", path)
     with open(_CONFIG_FILE, "w") as f:
         cfg.write(f)
+
+
+def get_lib_tables() -> list[str]:
+    """Return the configured list of library table file paths."""
+    cfg = configparser.ConfigParser()
+    cfg.read(_CONFIG_FILE)
+    raw = cfg.get(_SECTION, "lib_tables", fallback="")
+    return [p.strip() for p in raw.splitlines() if p.strip()]
+
+
+def set_lib_tables(paths: list[str]) -> None:
+    """Persist library table file paths (newline-separated) to kicaddy.ini."""
+    cfg = configparser.ConfigParser()
+    cfg.read(_CONFIG_FILE)
+    if not cfg.has_section(_SECTION):
+        cfg.add_section(_SECTION)
+    cfg.set(_SECTION, "lib_tables", "\n".join(paths))
+    with open(_CONFIG_FILE, "w") as f:
+        cfg.write(f)
