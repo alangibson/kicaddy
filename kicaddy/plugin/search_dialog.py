@@ -189,14 +189,19 @@ class SearchDialog(wx.Dialog):
         return self._notebook
 
     def _make_config_tab(self) -> wx.Panel:
+        from kicaddy.paths import paths as _kicad_paths
+
         panel = wx.Panel(self._notebook)
-        sizer = wx.BoxSizer(wx.VERTICAL)
+        outer = wx.BoxSizer(wx.VERTICAL)
 
-        sizer.Add(wx.StaticText(panel, label="Library Table Files:"), flag=wx.LEFT | wx.TOP, border=6)
+        # Top row: two columns side by side
+        columns = wx.BoxSizer(wx.HORIZONTAL)
 
+        # --- Left column: lib tables ---
+        left = wx.BoxSizer(wx.VERTICAL)
+        left.Add(wx.StaticText(panel, label="Library Table Files:"), flag=wx.BOTTOM, border=4)
         self._lib_tables_list = wx.ListBox(panel, style=wx.LB_SINGLE)
-        sizer.Add(self._lib_tables_list, proportion=1, flag=wx.EXPAND | wx.ALL, border=6)
-
+        left.Add(self._lib_tables_list, proportion=1, flag=wx.EXPAND | wx.BOTTOM, border=4)
         btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
         add_btn = wx.Button(panel, label="Add\u2026")
         remove_btn = wx.Button(panel, label="Remove")
@@ -204,19 +209,37 @@ class SearchDialog(wx.Dialog):
         remove_btn.Bind(wx.EVT_BUTTON, self._on_lib_remove)
         btn_sizer.Add(add_btn, flag=wx.RIGHT, border=6)
         btn_sizer.Add(remove_btn)
-        sizer.Add(btn_sizer, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=6)
+        left.Add(btn_sizer)
 
-        sizer.Add(wx.StaticLine(panel), flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=6)
+        # --- Right column: path variables ---
+        right = wx.BoxSizer(wx.VERTICAL)
+        right.Add(wx.StaticText(panel, label="KiCad Path Variables:"), flag=wx.BOTTOM, border=4)
+        path_vars = wx.ListCtrl(
+            panel,
+            style=wx.LC_REPORT | wx.LC_HRULES | wx.LC_VRULES | wx.BORDER_SIMPLE,
+        )
+        path_vars.InsertColumn(0, "Variable", width=220)
+        path_vars.InsertColumn(1, "Value", width=340)
+        for name, value in sorted(_kicad_paths.as_dict().items()):
+            idx = path_vars.InsertItem(path_vars.GetItemCount(), name)
+            path_vars.SetItem(idx, 1, value)
+        right.Add(path_vars, proportion=1, flag=wx.EXPAND)
 
+        columns.Add(left, proportion=1, flag=wx.EXPAND | wx.RIGHT, border=10)
+        columns.Add(right, proportion=1, flag=wx.EXPAND)
+        outer.Add(columns, proportion=1, flag=wx.EXPAND | wx.ALL, border=6)
+
+        # Bottom: separator + re-index
+        outer.Add(wx.StaticLine(panel), flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=6)
         reindex_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self._reindex_btn = wx.Button(panel, label="Re-index")
         self._reindex_btn.Bind(wx.EVT_BUTTON, self._on_reindex)
         self._reindex_status = wx.StaticText(panel, label="")
         reindex_sizer.Add(self._reindex_btn, flag=wx.RIGHT, border=8)
         reindex_sizer.Add(self._reindex_status, flag=wx.ALIGN_CENTER_VERTICAL)
-        sizer.Add(reindex_sizer, flag=wx.ALL, border=6)
+        outer.Add(reindex_sizer, flag=wx.ALL, border=6)
 
-        panel.SetSizer(sizer)
+        panel.SetSizer(outer)
         return panel
 
     def _make_status_row(self) -> wx.Sizer:
