@@ -38,12 +38,66 @@ STANDARD_PROPERTY_KEYS: frozenset[str] = frozenset({
     "package",
     "Package/Case",
     "Package / Case",
+    # Digi-Key aliases
+    "digikey", "digi-key", "digi_key",
+    "digikey#", "digikey_#", "digikey-#",
+    "digi-key#", "digi-key_#", "digi-key-#",
+    "digikeypn", "digikey_pn", "digikey-pn",
+    "digikeypn#", "digikey_pn#", "digikey-pn#",
+    "digi-key_pn", "digi-key-pn", "digi-key_pn#", "digi-key-pn#",
+    "digikeyvpn", "digikey_vpn", "digikey-vpn",
+    "digikeyvpn#", "digikey_vpn#", "digikey-vpn#",
+    "digikeyvp", "digikey_vp", "digikey-vp",
+    "digikeyvp#", "digikey_vp#", "digikey-vp#",
+    "digikeyvendor", "digikey_vendor", "digikey-vendor",
+    "digikeyvendor#", "digikey_vendor#", "digikey-vendor#",
+    "digikeynum", "digikey_num", "digikey-num",
+    "digikeynum#", "digikey_num#", "digikey-num#",
+    "DigiKey_PN", "Digi-Key_PN",
+    # Mouser aliases
+    "mouser",
+    "mouser#", "mouser_#", "mouser-#",
+    "mouserpn", "mouser_pn", "mouser-pn",
+    "mouserpn#", "mouser_pn#", "mouser-pn#",
+    "mouservpn", "mouser_vpn", "mouser-vpn",
+    "mouservpn#", "mouser_vpn#", "mouser-vpn#",
+    "mouservp", "mouser_vp", "mouser-vp",
+    "mouservp#", "mouser_vp#", "mouser-vp#",
+    "mouservendor", "mouser_vendor", "mouser-vendor",
+    "mouservendor#", "mouser_vendor#", "mouser-vendor#",
+    "mousernum", "mouser_num", "mouser-num",
+    "mousernum#", "mouser_num#", "mouser-num#",
+    "Mouser_PN", "Mouser PN",
+    # TME aliases
+    "tme",
+    "tme#", "tme_#", "tme-#",
+    "tmepn", "tme_pn", "tme-pn",
+    "tmepn#", "tme_pn#", "tme-pn#",
+    "tmevpn", "tme_vpn", "tme-vpn",
+    "tmevpn#", "tme_vpn#", "tme-vpn#",
+    "tmevp", "tme_vp", "tme-vp",
+    "tmevp#", "tme_vp#", "tme-vp#",
+    "tmenum", "tme_num", "tme-num",
+    "tmenum#", "tme_num#", "tme-num#",
+    "TME_PN",
+    # LCSC aliases
+    "lcsc",
+    "lcsc#", "lcsc_#", "lcsc-#",
+    "lcscpn", "lcsc_pn", "lcsc-pn",
+    "lcscpn#", "lcsc_pn#", "lcsc-pn#",
+    "lcscvpn", "lcsc_vpn", "lcsc-vpn",
+    "lcscvpn#", "lcsc_vpn#", "lcsc-vpn#",
+    "lcscvp", "lcsc_vp", "lcsc-vp",
+    "lcscvp#", "lcsc_vp#", "lcsc-vp#",
+    "lcscnum", "lcsc_num", "lcsc-num",
+    "lcscnum#", "lcsc_num#", "lcsc-num#",
+    "LCSC_PN", "LCSC Part", "LCSC Part Number",
 })
 
 
 @dataclass
 class Library:
-    library_path: str       # relative path to the .kicad_sym file
+    library_path: str       # absolute path to the .kicad_sym file
     library_type: LibraryType
     version: int            # e.g. 20241209
     generator: str          # e.g. "kicad_symbol_editor"
@@ -114,6 +168,10 @@ class Symbol:
     mpn: str | None = None     # Manufacturer Part Number
     manufacturer: str | None = None  # Manufacturer name
     package: str | None = None  # Package/footprint name (e.g. "SOT-23", "R_0402_1005Metric")
+    digikey_pn: str | None = None    # Digi-Key part number
+    mouser_pn: str | None = None     # Mouser part number
+    tme_pn: str | None = None        # TME part number
+    lcsc_pn: str | None = None       # LCSC part number
     # Derived from library file path and footprint string
     mounting: str | None = None  # "SMD", "THT", or None
     category: str | None = None  # First segment of library name (e.g. "Resistor", "MCU")

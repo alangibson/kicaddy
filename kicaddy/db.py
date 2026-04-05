@@ -50,9 +50,13 @@ CREATE TABLE IF NOT EXISTS symbol (
     datasheet        TEXT    NOT NULL DEFAULT '',
     description      TEXT    NOT NULL DEFAULT '',
     keywords         TEXT    NOT NULL DEFAULT '',
-    mpn              TEXT,
-    manufacturer     TEXT,
-    package          TEXT,
+    mpn              TEXT     DEFAULT NULL,
+    manufacturer     TEXT     DEFAULT NULL,
+    package          TEXT     DEFAULT NULL,
+    digikey_pn       TEXT     DEFAULT NULL,
+    mouser_pn        TEXT     DEFAULT NULL,
+    tme_pn           TEXT     DEFAULT NULL,
+    lcsc_pn          TEXT     DEFAULT NULL,
     mounting         TEXT,
     category         TEXT,
     library_name     TEXT    NOT NULL DEFAULT '',
@@ -163,8 +167,9 @@ def insert_symbol(conn: sqlite3.Connection, symbol: Symbol) -> int:
         INSERT INTO symbol
             (library_id, name, extends, kicad_library_id, unit_id,
              reference, value, footprint, datasheet, description, keywords,
-             mpn, manufacturer, package, mounting, category, library_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             mpn, manufacturer, package, digikey_pn, mouser_pn, tme_pn, lcsc_pn,
+             mounting, category, library_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(library_id, name) DO UPDATE SET
             extends          = excluded.extends,
             kicad_library_id = excluded.kicad_library_id,
@@ -178,6 +183,18 @@ def insert_symbol(conn: sqlite3.Connection, symbol: Symbol) -> int:
             mpn              = excluded.mpn,
             manufacturer     = excluded.manufacturer,
             package          = excluded.package,
+            digikey_pn       = CASE WHEN excluded.digikey_pn IS NOT NULL
+                                    THEN excluded.digikey_pn
+                                    ELSE symbol.digikey_pn END,
+            mouser_pn        = CASE WHEN excluded.mouser_pn IS NOT NULL
+                                    THEN excluded.mouser_pn
+                                    ELSE symbol.mouser_pn END,
+            tme_pn           = CASE WHEN excluded.tme_pn IS NOT NULL
+                                    THEN excluded.tme_pn
+                                    ELSE symbol.tme_pn END,
+            lcsc_pn          = CASE WHEN excluded.lcsc_pn IS NOT NULL
+                                    THEN excluded.lcsc_pn
+                                    ELSE symbol.lcsc_pn END,
             mounting         = excluded.mounting,
             category         = excluded.category,
             library_name     = excluded.library_name
@@ -198,6 +215,10 @@ def insert_symbol(conn: sqlite3.Connection, symbol: Symbol) -> int:
             symbol.mpn,
             symbol.manufacturer,
             symbol.package,
+            symbol.digikey_pn,
+            symbol.mouser_pn,
+            symbol.tme_pn,
+            symbol.lcsc_pn,
             symbol.mounting,
             symbol.category,
             symbol.library_name,
@@ -313,6 +334,29 @@ def link_symbols_to_footprints(conn: sqlite3.Connection) -> None:
     )
 
 
+def update_symbol_supplier_field(
+    conn: sqlite3.Connection,
+    symbol_id: int,
+    field_name: str,
+    value: str,
+) -> None:
+    """Update a single supplier/MPN field on a symbol row.
+
+    field_name must be one of: 'mpn', 'digikey_pn', 'mouser_pn', 'tme_pn', 'lcsc_pn'.
+    Stores empty string as NULL.
+    Raises ValueError for unknown field names.
+    """
+    allowed = frozenset({"mpn", "digikey_pn", "mouser_pn", "tme_pn", "lcsc_pn"})
+    if field_name not in allowed:
+        raise ValueError(f"Unknown supplier field: {field_name!r}")
+    stored_value = value.strip() or None
+    conn.execute(
+        f"UPDATE symbol SET {field_name} = ? WHERE id = ?",  # noqa: S608 — field_name validated above
+        (stored_value, symbol_id),
+    )
+    conn.commit()
+
+
 def insert_parts_from_links(conn: sqlite3.Connection) -> int:
     """
     Populate the part table from existing symbol→footprint links.
@@ -322,7 +366,7 @@ def insert_parts_from_links(conn: sqlite3.Connection) -> int:
     """
     cur = conn.execute(
         """
-        INSERT INTO part (symbol_id, footprint_id, mpn)
+        INSERT OR IGNORE INTO part (symbol_id, footprint_id, mpn)
         SELECT id, footprint_id, mpn
         FROM symbol
         WHERE footprint_id IS NOT NULL

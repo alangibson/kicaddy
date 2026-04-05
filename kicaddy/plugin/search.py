@@ -24,6 +24,13 @@ class PartResult:
     mpn: str
     model_path: str = ""  # resolved absolute path to STEP file, empty if none
     svg_path: str = ""    # absolute path to cached SVG render, empty if not rendered
+    symbol_id: int = 0          # symbol.id — needed for in-place DB edits
+    symbol_raw_name: str = ""   # symbol.name — raw name inside the .kicad_sym file
+    library_path: str = ""      # library.library_path — for writability check
+    digikey_pn: str = ""
+    mouser_pn: str = ""
+    tme_pn: str = ""
+    lcsc_pn: str = ""
 
 
 # Search all text columns in symbol + symbol_property, and footprint + footprint_property.
@@ -139,10 +146,18 @@ SELECT DISTINCT
     s.description,
     COALESCE(p.mpn, '')                                                 AS mpn,
     COALESCE(sol.model_path, '')                                        AS model_path,
-    COALESCE(sol.svg_path, '')                                          AS svg_path
+    COALESCE(sol.svg_path, '')                                          AS svg_path,
+    s.id                                                                AS symbol_id,
+    s.name                                                              AS symbol_raw_name,
+    l.library_path                                                      AS library_path,
+    COALESCE(s.digikey_pn, '')                                          AS digikey_pn,
+    COALESCE(s.mouser_pn,  '')                                          AS mouser_pn,
+    COALESCE(s.tme_pn,     '')                                          AS tme_pn,
+    COALESCE(s.lcsc_pn,    '')                                          AS lcsc_pn
 FROM part p
-JOIN symbol s ON s.id = p.symbol_id
+JOIN symbol s    ON s.id = p.symbol_id
 JOIN footprint f ON f.id = p.footprint_id
+JOIN library l   ON l.id = s.library_id
 LEFT JOIN solid sol ON sol.footprint_id = f.id
 WHERE {where}
 ORDER BY symbol_library, symbol_name
@@ -251,6 +266,37 @@ def search_parts(db_path: str, pattern: str) -> list[PartResult]:
             mpn=row[4] or "",
             model_path=row[5] or "",
             svg_path=row[6] or "",
+            symbol_id=row[7] or 0,
+            symbol_raw_name=row[8] or "",
+            library_path=row[9] or "",
+            digikey_pn=row[10] or "",
+            mouser_pn=row[11] or "",
+            tme_pn=row[12] or "",
+            lcsc_pn=row[13] or "",
         )
         for row in rows
     ]
+
+
+def update_part_supplier_field(
+    db_path: str,
+    symbol_id: int,
+    field_name: str,
+    value: str,
+) -> None:
+    """Persist a supplier PN or MPN edit to the database.
+
+    Raises ValueError on database error or unknown field name.
+    """
+    from kicaddy import db as _db
+
+    try:
+        conn = _db.get_connection(db_path)
+    except Exception as exc:
+        raise ValueError(f"Cannot open database: {exc}") from exc
+    try:
+        _db.update_symbol_supplier_field(conn, symbol_id, field_name, value)
+    except Exception as exc:
+        raise ValueError(f"Failed to save: {exc}") from exc
+    finally:
+        conn.close()
