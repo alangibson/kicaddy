@@ -322,7 +322,7 @@ def insert_parts_from_links(conn: sqlite3.Connection) -> int:
     """
     cur = conn.execute(
         """
-        INSERT INTO part (symbol_id, footprint_id, mpn)
+        INSERT OR IGNORE INTO part (symbol_id, footprint_id, mpn)
         SELECT id, footprint_id, mpn
         FROM symbol
         WHERE footprint_id IS NOT NULL

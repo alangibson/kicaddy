@@ -131,23 +131,11 @@ class SearchDialog(wx.Dialog):
 
     def _build_ui(self) -> None:
         root = wx.BoxSizer(wx.VERTICAL)
-        root.Add(self._make_db_row(), flag=wx.EXPAND | wx.ALL, border=6)
-        root.Add(self._make_search_row(), flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, border=6)
+        root.Add(self._make_search_row(), flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM, border=6)
         root.Add(self._make_notebook(), proportion=1, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=6)
         root.Add(self._make_status_row(), flag=wx.EXPAND | wx.ALL, border=6)
         self.SetSizerAndFit(root)
         self.SetSize((1050, 600))
-
-    def _make_db_row(self) -> wx.Sizer:
-        sizer = wx.BoxSizer(wx.HORIZONTAL)
-        label = wx.StaticText(self, label="Database:")
-        self._db_path_input = wx.TextCtrl(self, style=wx.TE_PROCESS_ENTER)
-        browse_btn = wx.Button(self, label="Browse…")
-        browse_btn.Bind(wx.EVT_BUTTON, self._on_browse)
-        sizer.Add(label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
-        sizer.Add(self._db_path_input, proportion=1, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
-        sizer.Add(browse_btn, flag=wx.ALIGN_CENTER_VERTICAL)
-        return sizer
 
     def _make_search_row(self) -> wx.Sizer:
         sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -229,15 +217,20 @@ class SearchDialog(wx.Dialog):
         columns.Add(right, proportion=1, flag=wx.EXPAND)
         outer.Add(columns, proportion=1, flag=wx.EXPAND | wx.ALL, border=6)
 
-        # Bottom: separator + re-index
+        # Bottom: database path + browse + re-index
         outer.Add(wx.StaticLine(panel), flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=6)
-        reindex_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        db_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        db_label = wx.StaticText(panel, label="Database:")
+        self._db_path_input = wx.TextCtrl(panel, style=wx.TE_PROCESS_ENTER)
+        browse_btn = wx.Button(panel, label="Browse\u2026")
+        browse_btn.Bind(wx.EVT_BUTTON, self._on_browse)
         self._reindex_btn = wx.Button(panel, label="Re-index")
         self._reindex_btn.Bind(wx.EVT_BUTTON, self._on_reindex)
-        self._reindex_status = wx.StaticText(panel, label="")
-        reindex_sizer.Add(self._reindex_btn, flag=wx.RIGHT, border=8)
-        reindex_sizer.Add(self._reindex_status, flag=wx.ALIGN_CENTER_VERTICAL)
-        outer.Add(reindex_sizer, flag=wx.ALL, border=6)
+        db_sizer.Add(db_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
+        db_sizer.Add(self._db_path_input, proportion=1, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
+        db_sizer.Add(browse_btn, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
+        db_sizer.Add(self._reindex_btn, flag=wx.ALIGN_CENTER_VERTICAL)
+        outer.Add(db_sizer, flag=wx.EXPAND | wx.ALL, border=6)
 
         panel.SetSizer(outer)
         return panel
@@ -373,16 +366,16 @@ class SearchDialog(wx.Dialog):
 
         db_path = self._db_path_input.GetValue().strip()
         if not db_path:
-            self._reindex_status.SetLabel("No database path set.")
+            self._set_status("No database path set.", error=True)
             return
 
         table_paths = list(self._lib_tables_list.GetItems())
         if not table_paths:
-            self._reindex_status.SetLabel("No library tables configured.")
+            self._set_status("No library tables configured.", error=True)
             return
 
         self._reindex_btn.Disable()
-        self._reindex_status.SetLabel("Indexing\u2026")
+        self._set_status("Indexing\u2026", error=False)
 
         def _run() -> None:
             try:
@@ -406,7 +399,8 @@ class SearchDialog(wx.Dialog):
     # ------------------------------------------------------------------
 
     def _reindex_done(self, msg: str) -> None:
-        self._reindex_status.SetLabel(msg)
+        error = msg.startswith("Error")
+        self._set_status(msg, error=error)
         self._reindex_btn.Enable()
 
     def _set_status(self, message: str, *, error: bool) -> None:
