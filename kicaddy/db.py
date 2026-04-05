@@ -50,13 +50,13 @@ CREATE TABLE IF NOT EXISTS symbol (
     datasheet        TEXT    NOT NULL DEFAULT '',
     description      TEXT    NOT NULL DEFAULT '',
     keywords         TEXT    NOT NULL DEFAULT '',
-    mpn              TEXT,
-    manufacturer     TEXT,
-    package          TEXT,
-    digikey_pn       TEXT,
-    mouser_pn        TEXT,
-    tme_pn           TEXT,
-    lcsc_pn          TEXT,
+    mpn              TEXT     DEFAULT NULL,
+    manufacturer     TEXT     DEFAULT NULL,
+    package          TEXT     DEFAULT NULL,
+    digikey_pn       TEXT     DEFAULT NULL,
+    mouser_pn        TEXT     DEFAULT NULL,
+    tme_pn           TEXT     DEFAULT NULL,
+    lcsc_pn          TEXT     DEFAULT NULL,
     mounting         TEXT,
     category         TEXT,
     library_name     TEXT    NOT NULL DEFAULT '',
@@ -108,24 +108,6 @@ CREATE INDEX IF NOT EXISTS idx_part_footprint_id
 """
 
 
-_MIGRATIONS = [
-    "ALTER TABLE symbol ADD COLUMN digikey_pn TEXT",
-    "ALTER TABLE symbol ADD COLUMN mouser_pn   TEXT",
-    "ALTER TABLE symbol ADD COLUMN tme_pn      TEXT",
-    "ALTER TABLE symbol ADD COLUMN lcsc_pn     TEXT",
-]
-
-
-def _apply_migrations(conn: sqlite3.Connection) -> None:
-    """Run forward-only schema migrations. Silently skips already-applied ones."""
-    for sql in _MIGRATIONS:
-        try:
-            conn.execute(sql)
-        except sqlite3.OperationalError:
-            pass  # column already exists
-    conn.commit()
-
-
 def get_connection(db_path: str) -> sqlite3.Connection:
     """Open a SQLite connection with WAL journal mode and foreign keys enabled."""
     conn = sqlite3.connect(db_path)
@@ -138,7 +120,6 @@ def create_schema(conn: sqlite3.Connection) -> None:
     """Execute all CREATE TABLE / CREATE INDEX DDL statements."""
     conn.executescript(_DDL)
     conn.commit()
-    _apply_migrations(conn)
 
 
 def upsert_library(conn: sqlite3.Connection, lib: Library) -> int:
@@ -385,7 +366,7 @@ def insert_parts_from_links(conn: sqlite3.Connection) -> int:
     """
     cur = conn.execute(
         """
-        INSERT INTO part (symbol_id, footprint_id, mpn)
+        INSERT OR IGNORE INTO part (symbol_id, footprint_id, mpn)
         SELECT id, footprint_id, mpn
         FROM symbol
         WHERE footprint_id IS NOT NULL

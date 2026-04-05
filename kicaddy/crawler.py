@@ -87,7 +87,7 @@ def crawl_and_index(
         logger.info("Indexing %s", rel_path)
 
         library, symbols = parser.parse_library_file(
-            abs_path, rel_path, LibraryType.SYMBOL
+            abs_path, str(abs_path), LibraryType.SYMBOL
         )
 
         try:
@@ -128,7 +128,7 @@ def crawl_and_index(
         stats.footprint_libs_found += 1
         logger.info("Indexing footprint library %s", rel_path)
 
-        library, footprints = parser.parse_footprint_library_dir(abs_path, rel_path)
+        library, footprints = parser.parse_footprint_library_dir(abs_path, str(abs_path))
 
         try:
             library_id = db.upsert_library(conn, library)

@@ -45,10 +45,91 @@ def _expand_model_path(raw: str, mod_file: Path) -> str:
 _MPN_KEYS = ("MPN", "mpn", "Part Number", "PartNumber", "Part_Number", "PART_NUMBER")
 _MANUFACTURER_KEYS = ("Manufacturer", "MFR", "Mfr", "manufacturer", "MANUFACTURER")
 _PACKAGE_PROP_KEYS = ("Package", "package", "Package/Case", "Package / Case")
-_DIGIKEY_KEYS = ("Digikey", "DigiKey", "Digi-Key", "digikey", "DIGIKEY", "Digikey_PN", "DigiKey_PN")
-_MOUSER_KEYS  = ("Mouser", "mouser", "MOUSER", "Mouser_PN", "Mouser PN")
-_TME_KEYS     = ("TME", "tme", "TME_PN")
-_LCSC_KEYS    = ("LCSC", "lcsc", "LCSC_PN", "LCSC Part", "LCSC Part Number")
+_DIGIKEY_KEYS = (
+    # bare
+    "digikey", "digi-key", "digi_key",
+    # bare + #
+    "digikey#", "digikey_#", "digikey-#",
+    "digi-key#", "digi-key_#", "digi-key-#",
+    # pn
+    "digikeypn",    "digikey_pn",    "digikey-pn",
+    "digikeypn#",   "digikey_pn#",   "digikey-pn#",
+    "digi-key_pn",  "digi-key-pn",
+    "digi-key_pn#", "digi-key-pn#",
+    # vpn / vp
+    "digikeyvpn",   "digikey_vpn",   "digikey-vpn",
+    "digikeyvpn#",  "digikey_vpn#",  "digikey-vpn#",
+    "digikeyvp",    "digikey_vp",    "digikey-vp",
+    "digikeyvp#",   "digikey_vp#",   "digikey-vp#",
+    # vendor
+    "digikeyvendor",  "digikey_vendor",  "digikey-vendor",
+    "digikeyvendor#", "digikey_vendor#", "digikey-vendor#",
+    # num
+    "digikeynum",   "digikey_num",   "digikey-num",
+    "digikeynum#",  "digikey_num#",  "digikey-num#",
+    # legacy / mixed-case canonical forms
+    "DigiKey_PN", "Digi-Key_PN",
+)
+_MOUSER_KEYS = (
+    # bare
+    "mouser",
+    # bare + #
+    "mouser#", "mouser_#", "mouser-#",
+    # pn
+    "mouserpn",    "mouser_pn",    "mouser-pn",
+    "mouserpn#",   "mouser_pn#",   "mouser-pn#",
+    # vpn / vp
+    "mouservpn",   "mouser_vpn",   "mouser-vpn",
+    "mouservpn#",  "mouser_vpn#",  "mouser-vpn#",
+    "mouservp",    "mouser_vp",    "mouser-vp",
+    "mouservp#",   "mouser_vp#",   "mouser-vp#",
+    # vendor
+    "mouservendor",  "mouser_vendor",  "mouser-vendor",
+    "mouservendor#", "mouser_vendor#", "mouser-vendor#",
+    # num
+    "mousernum",   "mouser_num",   "mouser-num",
+    "mousernum#",  "mouser_num#",  "mouser-num#",
+    # legacy
+    "Mouser_PN", "Mouser PN",
+)
+_TME_KEYS = (
+    # bare
+    "tme",
+    # bare + #
+    "tme#", "tme_#", "tme-#",
+    # pn
+    "tmepn",   "tme_pn",   "tme-pn",
+    "tmepn#",  "tme_pn#",  "tme-pn#",
+    # vpn / vp
+    "tmevpn",  "tme_vpn",  "tme-vpn",
+    "tmevpn#", "tme_vpn#", "tme-vpn#",
+    "tmevp",   "tme_vp",   "tme-vp",
+    "tmevp#",  "tme_vp#",  "tme-vp#",
+    # num
+    "tmenum",  "tme_num",  "tme-num",
+    "tmenum#", "tme_num#", "tme-num#",
+    # legacy
+    "TME_PN",
+)
+_LCSC_KEYS = (
+    # bare
+    "lcsc",
+    # bare + #
+    "lcsc#", "lcsc_#", "lcsc-#",
+    # pn
+    "lcscpn",   "lcsc_pn",   "lcsc-pn",
+    "lcscpn#",  "lcsc_pn#",  "lcsc-pn#",
+    # vpn / vp
+    "lcscvpn",  "lcsc_vpn",  "lcsc-vpn",
+    "lcscvpn#", "lcsc_vpn#", "lcsc-vpn#",
+    "lcscvp",   "lcsc_vp",   "lcsc-vp",
+    "lcscvp#",  "lcsc_vp#",  "lcsc-vp#",
+    # num
+    "lcscnum",  "lcsc_num",  "lcsc-num",
+    "lcscnum#", "lcsc_num#", "lcsc-num#",
+    # legacy
+    "LCSC_PN", "LCSC Part", "LCSC Part Number",
+)
 
 # Library name prefixes / patterns that unambiguously indicate SMD packages
 _SMD_FOOTPRINT_LIBS = frozenset({
@@ -74,10 +155,12 @@ _THT_FP_HINTS = (
 
 
 def _first(props: dict[str, str], keys: tuple[str, ...]) -> str | None:
-    """Return the value of the first matching key in props, or None."""
+    """Return the value of the first matching key in props (case-insensitive), or None."""
+    lower_props = {k.lower(): v for k, v in props.items()}
     for k in keys:
-        if k in props:
-            return props[k] or None
+        v = lower_props.get(k.lower())
+        if v is not None:
+            return v or None
     return None
 
 
@@ -214,10 +297,11 @@ def _extract_symbol(
 
     props: dict[str, str] = kicad_sym.properties(sym_node)
 
+    _standard_lower = frozenset(k.lower() for k in STANDARD_PROPERTY_KEYS)
     extra_properties: list[SymbolProperty] = [
         SymbolProperty(key=k, value=v)
         for k, v in props.items()
-        if k not in STANDARD_PROPERTY_KEYS
+        if k.lower() not in _standard_lower
     ]
 
     footprint_str = props.get("Footprint", "")
