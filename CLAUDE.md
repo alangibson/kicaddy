@@ -47,3 +47,7 @@ main.py          # CLI entry point (argparse)
   so existing databases are upgraded transparently.
 - **Crawl phases**: (1) index symbol libraries, (2) index footprint libraries,
   (3) link symbols to footprints, (4) populate part table.
+
+## Working with Claude
+
+- **Never discard uncommitted changes** unless explicitly told to. Use `git stash` to preserve them when needed (e.g., before a rebase), then restore afterward.

@@ -210,6 +210,8 @@ def parse_library_file(
     file_path: Path,
     library_path: str,
     library_type: LibraryType = LibraryType.SYMBOL,
+    *,
+    name: str,
 ) -> tuple[Library, list[Symbol]]:
     """
     Load a .kicad_sym file and return (Library, list[Symbol]).
@@ -224,9 +226,9 @@ def parse_library_file(
         lib_tree = kicad_sym.load(file_path)
     except Exception as exc:
         logger.warning("Failed to load %s: %s", file_path, exc)
-        return _empty_library(library_path, library_type), []
+        return _empty_library(library_path, library_type, name), []
 
-    library = _extract_library_metadata(lib_tree, library_path, library_type)
+    library = _extract_library_metadata(lib_tree, library_path, library_type, name)
     lib_name = Path(library_path).stem
 
     symbols: list[Symbol] = []
@@ -249,6 +251,7 @@ def _extract_library_metadata(
     lib_tree: kicad_sym.Form,
     library_path: str,
     library_type: LibraryType,
+    name: str,
 ) -> Library:
     version_node = kicad_sym.child(lib_tree, "version")
     generator_node = kicad_sym.child(lib_tree, "generator")
@@ -264,16 +267,18 @@ def _extract_library_metadata(
         version=version,
         generator=generator,
         generator_version=generator_version,
+        name=name,
     )
 
 
-def _empty_library(library_path: str, library_type: LibraryType) -> Library:
+def _empty_library(library_path: str, library_type: LibraryType, name: str) -> Library:
     return Library(
         library_path=library_path,
         library_type=library_type,
         version=0,
         generator="",
         generator_version="",
+        name=name,
     )
 
 
@@ -352,6 +357,8 @@ def _node_children(
 def parse_footprint_library_dir(
     dir_path: Path,
     library_path: str,
+    *,
+    name: str,
 ) -> tuple[Library, list[Footprint]]:
     """
     Parse a .pretty footprint library directory and return (Library, list[Footprint]).
@@ -368,6 +375,7 @@ def parse_footprint_library_dir(
         version=0,
         generator="",
         generator_version="",
+        name=name,
     )
 
     library_name = Path(library_path).stem

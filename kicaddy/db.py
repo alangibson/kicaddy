@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS library (
     library_type      TEXT     NOT NULL DEFAULT 'symbol',
     version           INTEGER  NOT NULL DEFAULT 0,
     generator         TEXT     NOT NULL DEFAULT '',
-    generator_version TEXT     NOT NULL DEFAULT ''
+    generator_version TEXT     NOT NULL DEFAULT '',
+    name              TEXT     NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS footprint (
@@ -130,13 +131,14 @@ def upsert_library(conn: sqlite3.Connection, lib: Library) -> int:
     """
     cur = conn.execute(
         """
-        INSERT INTO library (library_path, library_type, version, generator, generator_version)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO library (library_path, library_type, version, generator, generator_version, name)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(library_path) DO UPDATE SET
             library_type      = excluded.library_type,
             version           = excluded.version,
             generator         = excluded.generator,
-            generator_version = excluded.generator_version
+            generator_version = excluded.generator_version,
+            name              = excluded.name
         RETURNING id
         """,
         (
@@ -145,6 +147,7 @@ def upsert_library(conn: sqlite3.Connection, lib: Library) -> int:
             lib.version,
             lib.generator,
             lib.generator_version,
+            lib.name,
         ),
     )
     row = cur.fetchone()

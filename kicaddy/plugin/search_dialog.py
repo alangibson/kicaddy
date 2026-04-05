@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import wx
 import wx.grid
 import wx.svg
@@ -196,6 +197,8 @@ class SearchDialog(wx.Dialog):
         saved = config.get_db_path()
         if saved:
             self._db_path_input.SetValue(saved)
+        for p in config.get_lib_tables():
+            self._lib_tables_list.Append(p)
         self._pattern_input.SetFocus()
 
     # ------------------------------------------------------------------
@@ -204,23 +207,11 @@ class SearchDialog(wx.Dialog):
 
     def _build_ui(self) -> None:
         root = wx.BoxSizer(wx.VERTICAL)
-        root.Add(self._make_db_row(), flag=wx.EXPAND | wx.ALL, border=6)
-        root.Add(self._make_search_row(), flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, border=6)
+        root.Add(self._make_search_row(), flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM, border=6)
         root.Add(self._make_notebook(), proportion=1, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=6)
         root.Add(self._make_status_row(), flag=wx.EXPAND | wx.ALL, border=6)
         self.SetSizerAndFit(root)
         self.SetSize((1300, 600))
-
-    def _make_db_row(self) -> wx.Sizer:
-        sizer = wx.BoxSizer(wx.HORIZONTAL)
-        label = wx.StaticText(self, label="Database:")
-        self._db_path_input = wx.TextCtrl(self, style=wx.TE_PROCESS_ENTER)
-        browse_btn = wx.Button(self, label="Browse…")
-        browse_btn.Bind(wx.EVT_BUTTON, self._on_browse)
-        sizer.Add(label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
-        sizer.Add(self._db_path_input, proportion=1, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
-        sizer.Add(browse_btn, flag=wx.ALIGN_CENTER_VERTICAL)
-        return sizer
 
     def _make_search_row(self) -> wx.Sizer:
         sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -252,6 +243,8 @@ class SearchDialog(wx.Dialog):
         self._notebook.AddPage(self._symbols_grid, "Symbols (0)")
         self._notebook.AddPage(self._footprints_grid, "Footprints (0)")
 
+        self._notebook.AddPage(self._make_config_tab(), "Configuration")
+
         self._parts_grid.Bind(wx.grid.EVT_GRID_SELECT_CELL, self._on_part_selected)
         self._parts_grid.Bind(wx.grid.EVT_GRID_CELL_LEFT_DCLICK, self._on_item_activated)
         self._parts_grid.Bind(wx.grid.EVT_GRID_CELL_CHANGING, self._on_parts_cell_changing)
@@ -260,6 +253,65 @@ class SearchDialog(wx.Dialog):
             g.Bind(wx.grid.EVT_GRID_CELL_LEFT_DCLICK, self._on_item_activated)
 
         return self._notebook
+
+    def _make_config_tab(self) -> wx.Panel:
+        from kicaddy.paths import paths as _kicad_paths
+
+        panel = wx.Panel(self._notebook)
+        outer = wx.BoxSizer(wx.VERTICAL)
+
+        # Top row: two columns side by side
+        columns = wx.BoxSizer(wx.HORIZONTAL)
+
+        # --- Left column: lib tables ---
+        left = wx.BoxSizer(wx.VERTICAL)
+        left.Add(wx.StaticText(panel, label="Library Table Files:"), flag=wx.BOTTOM, border=4)
+        self._lib_tables_list = wx.ListBox(panel, style=wx.LB_SINGLE)
+        left.Add(self._lib_tables_list, proportion=1, flag=wx.EXPAND | wx.BOTTOM, border=4)
+        btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        add_btn = wx.Button(panel, label="Add\u2026")
+        remove_btn = wx.Button(panel, label="Remove")
+        add_btn.Bind(wx.EVT_BUTTON, self._on_lib_add)
+        remove_btn.Bind(wx.EVT_BUTTON, self._on_lib_remove)
+        btn_sizer.Add(add_btn, flag=wx.RIGHT, border=6)
+        btn_sizer.Add(remove_btn)
+        left.Add(btn_sizer)
+
+        # --- Right column: path variables ---
+        right = wx.BoxSizer(wx.VERTICAL)
+        right.Add(wx.StaticText(panel, label="KiCad Path Variables:"), flag=wx.BOTTOM, border=4)
+        path_vars = wx.ListCtrl(
+            panel,
+            style=wx.LC_REPORT | wx.LC_HRULES | wx.LC_VRULES | wx.BORDER_SIMPLE,
+        )
+        path_vars.InsertColumn(0, "Variable", width=220)
+        path_vars.InsertColumn(1, "Value", width=340)
+        for name, value in sorted(_kicad_paths.as_dict().items()):
+            idx = path_vars.InsertItem(path_vars.GetItemCount(), name)
+            path_vars.SetItem(idx, 1, value)
+        right.Add(path_vars, proportion=1, flag=wx.EXPAND)
+
+        columns.Add(left, proportion=1, flag=wx.EXPAND | wx.RIGHT, border=10)
+        columns.Add(right, proportion=1, flag=wx.EXPAND)
+        outer.Add(columns, proportion=1, flag=wx.EXPAND | wx.ALL, border=6)
+
+        # Bottom: database path + browse + re-index
+        outer.Add(wx.StaticLine(panel), flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=6)
+        db_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        db_label = wx.StaticText(panel, label="Database:")
+        self._db_path_input = wx.TextCtrl(panel, style=wx.TE_PROCESS_ENTER)
+        browse_btn = wx.Button(panel, label="Browse\u2026")
+        browse_btn.Bind(wx.EVT_BUTTON, self._on_browse)
+        self._reindex_btn = wx.Button(panel, label="Re-index")
+        self._reindex_btn.Bind(wx.EVT_BUTTON, self._on_reindex)
+        db_sizer.Add(db_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
+        db_sizer.Add(self._db_path_input, proportion=1, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
+        db_sizer.Add(browse_btn, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
+        db_sizer.Add(self._reindex_btn, flag=wx.ALIGN_CENTER_VERTICAL)
+        outer.Add(db_sizer, flag=wx.EXPAND | wx.ALL, border=6)
+
+        panel.SetSizer(outer)
+        return panel
 
     def _make_status_row(self) -> wx.Sizer:
         sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -423,6 +475,59 @@ class SearchDialog(wx.Dialog):
     def _on_close(self, _event: wx.Event) -> None:
         self.EndModal(wx.ID_CANCEL)
 
+    def _on_lib_add(self, _event: wx.Event) -> None:
+        with wx.FileDialog(
+            self,
+            "Select a KiCad library table file",
+            wildcard="Library table files (*-lib-table)|*-lib-table|All files (*.*)|*.*",
+            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+        ) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                path = dlg.GetPath()
+                if self._lib_tables_list.FindString(path) == wx.NOT_FOUND:
+                    self._lib_tables_list.Append(path)
+                    config.set_lib_tables(list(self._lib_tables_list.GetItems()))
+
+    def _on_lib_remove(self, _event: wx.Event) -> None:
+        sel = self._lib_tables_list.GetSelection()
+        if sel != wx.NOT_FOUND:
+            self._lib_tables_list.Delete(sel)
+            config.set_lib_tables(list(self._lib_tables_list.GetItems()))
+
+    def _on_reindex(self, _event: wx.Event) -> None:
+        from kicaddy import db
+        from kicaddy.crawler import crawl_from_lib_tables
+
+        db_path = self._db_path_input.GetValue().strip()
+        if not db_path:
+            self._set_status("No database path set.", error=True)
+            return
+
+        table_paths = list(self._lib_tables_list.GetItems())
+        if not table_paths:
+            self._set_status("No library tables configured.", error=True)
+            return
+
+        self._reindex_btn.Disable()
+        self._set_status("Indexing\u2026", error=False)
+
+        def _run() -> None:
+            try:
+                conn = db.get_connection(db_path)
+                db.create_schema(conn)
+                stats = crawl_from_lib_tables(table_paths, conn)
+                conn.close()
+                msg = (
+                    f"Done. symbols={stats.symbols_indexed} "
+                    f"footprints={stats.footprints_indexed} "
+                    f"parts={stats.parts_created}"
+                )
+            except Exception as exc:
+                msg = f"Error: {exc}"
+            wx.CallAfter(self._reindex_done, msg)
+
+        threading.Thread(target=_run, daemon=True).start()
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -433,6 +538,11 @@ class SearchDialog(wx.Dialog):
             return library_path
         db_dir = os.path.dirname(self._db_path_input.GetValue().strip())
         return os.path.normpath(os.path.join(db_dir, library_path))
+
+    def _reindex_done(self, msg: str) -> None:
+        error = msg.startswith("Error")
+        self._set_status(msg, error=error)
+        self._reindex_btn.Enable()
 
     def _set_status(self, message: str, *, error: bool) -> None:
         self._status_label.SetForegroundColour(

@@ -102,6 +102,7 @@ class Library:
     version: int            # e.g. 20241209
     generator: str          # e.g. "kicad_symbol_editor"
     generator_version: str  # e.g. "9.0"; empty string if absent
+    name: str               # logical name from lib-table (e.g. "Device"), else stem of path
     id: int | None = None
 
 
