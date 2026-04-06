@@ -12,6 +12,7 @@ from kicaddy.sym_writer import write_symbol_property
 
 # Grid column definitions per tab: list of (header, width)
 _PART_COLUMNS = [
+    ("",               28),   # col 0: "Make Editable" button for ro libraries
     ("Symbol Library", 140),
     ("Symbol",         200),
     ("Footprint",      200),
@@ -38,20 +39,21 @@ _FOOTPRINT_COLUMNS = [
 ]
 
 # Columns (by index) in the Parts tab that support inline editing
-_EDITABLE_PART_COLS = frozenset({4, 5, 6, 7, 8})
+_EDITABLE_PART_COLS = frozenset({5, 6, 7, 8, 9})
 
 # Map column index → symbol table field name
 _COL_TO_FIELD: dict[int, str] = {
-    4: "mpn",
-    5: "digikey_pn",
-    6: "mouser_pn",
-    7: "tme_pn",
-    8: "lcsc_pn",
+    5: "mpn",
+    6: "digikey_pn",
+    7: "mouser_pn",
+    8: "tme_pn",
+    9: "lcsc_pn",
 }
 
 
 def _part_field(r: PartResult, col: int) -> str:
     return (
+        "E" if r.permissions == "ro" else "",  # col 0: button sentinel
         r.symbol_library,
         r.symbol_name,
         r.footprint,
@@ -72,17 +74,47 @@ def _footprint_field(r: SearchResult, col: int) -> str:
     return (r.library, r.name, r.description, r.extra2)[col]
 
 
+class _MakeEditableRenderer(wx.grid.GridCellRenderer):
+    """Draws a small 'E' push-button in cells whose value is 'E'; nothing otherwise."""
+
+    def Draw(self, grid, attr, dc, rect, row, col, isSelected):  # noqa: N802
+        dc.SetBrush(wx.Brush(attr.GetBackgroundColour()))
+        dc.SetPen(wx.TRANSPARENT_PEN)
+        dc.DrawRectangle(rect)
+        if grid.GetCellValue(row, col) != "E":
+            return
+        size = min(rect.width - 4, rect.height - 4, 20)
+        x = rect.x + (rect.width - size) // 2
+        y = rect.y + (rect.height - size) // 2
+        btn_rect = wx.Rect(x, y, size, size)
+        wx.RendererNative.Get().DrawPushButton(grid.GetGridWindow(), dc, btn_rect)
+        dc.SetFont(wx.Font(wx.FontInfo(7).Bold()))
+        dc.SetTextForeground(wx.BLACK)
+        dc.DrawLabel("E", btn_rect, wx.ALIGN_CENTER)
+
+    def GetBestSize(self, grid, attr, dc, row, col):  # noqa: N802
+        return wx.Size(28, 20)
+
+    def Clone(self):  # noqa: N802
+        return _MakeEditableRenderer()
+
+
 class _ResultTableBase(wx.grid.GridTableBase):
     """GridTableBase backed by a list of result objects."""
 
-    def __init__(self, columns: list[tuple[str, int]], field_fn, editable_cols=frozenset()) -> None:
+    def __init__(self, columns: list[tuple[str, int]], field_fn, editable_cols=frozenset(), btn_col: int = -1) -> None:
         super().__init__()
         self._columns = columns
         self._field_fn = field_fn
         self._editable_cols = editable_cols
+        self._btn_col = btn_col
         self._results: list = []
         self._ro_attr = wx.grid.GridCellAttr()
         self._ro_attr.SetReadOnly(True)
+        if btn_col >= 0:
+            self._btn_attr = wx.grid.GridCellAttr()
+            self._btn_attr.SetReadOnly(True)
+            self._btn_attr.SetRenderer(_MakeEditableRenderer())
 
     def set_results(self, results: list) -> None:
         old = len(self._results)
@@ -122,6 +154,9 @@ class _ResultTableBase(wx.grid.GridTableBase):
         pass  # commit handled in dialog via EVT_GRID_CELL_CHANGED
 
     def GetAttr(self, row: int, col: int, kind) -> wx.grid.GridCellAttr | None:  # noqa: N802
+        if col == self._btn_col:
+            self._btn_attr.IncRef()
+            return self._btn_attr
         if col not in self._editable_cols:
             self._ro_attr.IncRef()
             return self._ro_attr
@@ -137,9 +172,10 @@ class _ResultGrid(wx.grid.Grid):
         columns: list[tuple[str, int]],
         field_fn,
         editable_cols=frozenset(),
+        btn_col: int = -1,
     ) -> None:
         super().__init__(parent)
-        self._table = _ResultTableBase(columns, field_fn, editable_cols)
+        self._table = _ResultTableBase(columns, field_fn, editable_cols, btn_col=btn_col)
         self.SetTable(self._table, takeOwnership=False)
         self.SetRowLabelSize(0)
         self.DisableDragRowSize()
@@ -230,7 +266,7 @@ class SearchDialog(wx.Dialog):
 
         # Parts tab: splitter with grid on left, 3D preview on right
         parts_splitter = wx.SplitterWindow(self._notebook, style=wx.SP_LIVE_UPDATE)
-        self._parts_grid = _ResultGrid(parts_splitter, _PART_COLUMNS, _part_field, _EDITABLE_PART_COLS)
+        self._parts_grid = _ResultGrid(parts_splitter, _PART_COLUMNS, _part_field, _EDITABLE_PART_COLS, btn_col=0)
         self._preview_panel = _PreviewPanel(parts_splitter)
         parts_splitter.SplitVertically(self._parts_grid, self._preview_panel, sashPosition=1010)
         parts_splitter.SetMinimumPaneSize(200)
@@ -246,8 +282,10 @@ class SearchDialog(wx.Dialog):
 
         self._parts_grid.Bind(wx.grid.EVT_GRID_SELECT_CELL, self._on_part_selected)
         self._parts_grid.Bind(wx.grid.EVT_GRID_CELL_LEFT_DCLICK, self._on_item_activated)
+        self._parts_grid.Bind(wx.grid.EVT_GRID_CELL_LEFT_CLICK, self._on_parts_cell_click)
         self._parts_grid.Bind(wx.grid.EVT_GRID_CELL_CHANGING, self._on_parts_cell_changing)
         self._parts_grid.Bind(wx.grid.EVT_GRID_CELL_CHANGED, self._on_parts_cell_changed)
+        self._parts_grid.GetGridWindow().Bind(wx.EVT_MOTION, self._on_parts_grid_motion)
         for g in (self._symbols_grid, self._footprints_grid):
             g.Bind(wx.grid.EVT_GRID_CELL_LEFT_DCLICK, self._on_item_activated)
 
@@ -471,6 +509,31 @@ class SearchDialog(wx.Dialog):
             error=False,
         )
 
+    def _on_parts_cell_click(self, event: wx.grid.GridEvent) -> None:
+        if event.GetCol() != 0:
+            event.Skip()
+            return
+        row = event.GetRow()
+        results = self._parts_grid._table._results
+        if row >= len(results):
+            return
+        result = results[row]
+        if result.permissions != "ro":
+            return
+        self._make_library_editable(result)
+
+    def _on_parts_grid_motion(self, event: wx.MouseEvent) -> None:
+        x, y = self._parts_grid.CalcUnscrolledPosition(event.GetPosition())
+        col = self._parts_grid.XToCol(x)
+        row = self._parts_grid.YToRow(y)
+        results = self._parts_grid._table._results
+        if (col == 0 and 0 <= row < len(results)
+                and results[row].permissions == "ro"):
+            self._parts_grid.GetGridWindow().SetToolTip("Make Editable")
+        else:
+            self._parts_grid.GetGridWindow().SetToolTip("")
+        event.Skip()
+
     def _on_close(self, _event: wx.Event) -> None:
         self.EndModal(wx.ID_CANCEL)
 
@@ -530,6 +593,29 @@ class SearchDialog(wx.Dialog):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _make_library_editable(self, result) -> None:
+        import stat
+        lib_path = self._resolve_library_path(result.library_path)
+        try:
+            current_mode = os.stat(lib_path).st_mode
+            os.chmod(lib_path, current_mode | stat.S_IRUSR | stat.S_IWUSR)
+        except Exception as exc:
+            self._set_status(f"Could not make library editable: {exc}", error=True)
+            return
+        db_path = self._db_path_input.GetValue().strip()
+        try:
+            from kicaddy import db as _db
+            conn = _db.get_connection(db_path)
+            conn.execute("UPDATE library SET permissions='rw' WHERE library_path=?", (result.library_path,))
+            conn.commit()
+            conn.close()
+        except Exception as exc:
+            self._set_status(f"File is now writable but DB update failed: {exc}", error=True)
+            return
+        result.permissions = "rw"
+        self._parts_grid.ForceRefresh()
+        self._set_status(f"Library is now editable: {lib_path}", error=False)
 
     def _resolve_library_path(self, library_path: str) -> str:
         """Resolve a possibly-relative library_path against the DB file's directory."""

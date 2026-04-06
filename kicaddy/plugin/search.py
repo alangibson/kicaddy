@@ -27,6 +27,7 @@ class PartResult:
     symbol_id: int = 0          # symbol.id — needed for in-place DB edits
     symbol_raw_name: str = ""   # symbol.name — raw name inside the .kicad_sym file
     library_path: str = ""      # library.library_path — for writability check
+    permissions: str = "ro"     # library.permissions — "rw" or "ro"
     digikey_pn: str = ""
     mouser_pn: str = ""
     tme_pn: str = ""
@@ -149,6 +150,7 @@ SELECT DISTINCT
     s.id                                                                AS symbol_id,
     s.name                                                              AS symbol_raw_name,
     l.library_path                                                      AS library_path,
+    l.permissions                                                       AS permissions,
     COALESCE(s.digikey_pn, '')                                          AS digikey_pn,
     COALESCE(s.mouser_pn,  '')                                          AS mouser_pn,
     COALESCE(s.tme_pn,     '')                                          AS tme_pn,
@@ -268,10 +270,11 @@ def search_parts(db_path: str, pattern: str) -> list[PartResult]:
             symbol_id=row[7] or 0,
             symbol_raw_name=row[8] or "",
             library_path=row[9] or "",
-            digikey_pn=row[10] or "",
-            mouser_pn=row[11] or "",
-            tme_pn=row[12] or "",
-            lcsc_pn=row[13] or "",
+            permissions=row[10] or "ro",
+            digikey_pn=row[11] or "",
+            mouser_pn=row[12] or "",
+            tme_pn=row[13] or "",
+            lcsc_pn=row[14] or "",
         )
         for row in rows
     ]
