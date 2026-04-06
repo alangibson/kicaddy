@@ -12,6 +12,7 @@ from kicaddy.sym_writer import write_symbol_property
 
 # Grid column definitions per tab: list of (header, width)
 _PART_COLUMNS = [
+    ("",               28),   # col 0: "Make Editable" button for ro libraries
     ("Symbol Library", 140),
     ("Symbol",         200),
     ("Footprint",      200),
@@ -38,20 +39,21 @@ _FOOTPRINT_COLUMNS = [
 ]
 
 # Columns (by index) in the Parts tab that support inline editing
-_EDITABLE_PART_COLS = frozenset({4, 5, 6, 7, 8})
+_EDITABLE_PART_COLS = frozenset({5, 6, 7, 8, 9})
 
 # Map column index → symbol table field name
 _COL_TO_FIELD: dict[int, str] = {
-    4: "mpn",
-    5: "digikey_pn",
-    6: "mouser_pn",
-    7: "tme_pn",
-    8: "lcsc_pn",
+    5: "mpn",
+    6: "digikey_pn",
+    7: "mouser_pn",
+    8: "tme_pn",
+    9: "lcsc_pn",
 }
 
 
 def _part_field(r: PartResult, col: int) -> str:
     return (
+        "E" if r.permissions == "ro" else "",  # col 0: button sentinel
         r.symbol_library,
         r.symbol_name,
         r.footprint,
@@ -72,17 +74,47 @@ def _footprint_field(r: SearchResult, col: int) -> str:
     return (r.library, r.name, r.description, r.extra2)[col]
 
 
+class _MakeEditableRenderer(wx.grid.GridCellRenderer):
+    """Draws a small 'E' push-button in cells whose value is 'E'; nothing otherwise."""
+
+    def Draw(self, grid, attr, dc, rect, row, col, isSelected):  # noqa: N802
+        dc.SetBrush(wx.Brush(attr.GetBackgroundColour()))
+        dc.SetPen(wx.TRANSPARENT_PEN)
+        dc.DrawRectangle(rect)
+        if grid.GetCellValue(row, col) != "E":
+            return
+        size = min(rect.width - 4, rect.height - 4, 20)
+        x = rect.x + (rect.width - size) // 2
+        y = rect.y + (rect.height - size) // 2
+        btn_rect = wx.Rect(x, y, size, size)
+        wx.RendererNative.Get().DrawPushButton(grid.GetGridWindow(), dc, btn_rect)
+        dc.SetFont(wx.Font(wx.FontInfo(7).Bold()))
+        dc.SetTextForeground(wx.BLACK)
+        dc.DrawLabel("E", btn_rect, wx.ALIGN_CENTER)
+
+    def GetBestSize(self, grid, attr, dc, row, col):  # noqa: N802
+        return wx.Size(28, 20)
+
+    def Clone(self):  # noqa: N802
+        return _MakeEditableRenderer()
+
+
 class _ResultTableBase(wx.grid.GridTableBase):
     """GridTableBase backed by a list of result objects."""
 
-    def __init__(self, columns: list[tuple[str, int]], field_fn, editable_cols=frozenset()) -> None:
+    def __init__(self, columns: list[tuple[str, int]], field_fn, editable_cols=frozenset(), btn_col: int = -1) -> None:
         super().__init__()
         self._columns = columns
         self._field_fn = field_fn
         self._editable_cols = editable_cols
+        self._btn_col = btn_col
         self._results: list = []
         self._ro_attr = wx.grid.GridCellAttr()
         self._ro_attr.SetReadOnly(True)
+        if btn_col >= 0:
+            self._btn_attr = wx.grid.GridCellAttr()
+            self._btn_attr.SetReadOnly(True)
+            self._btn_attr.SetRenderer(_MakeEditableRenderer())
 
     def set_results(self, results: list) -> None:
         old = len(self._results)
@@ -122,6 +154,9 @@ class _ResultTableBase(wx.grid.GridTableBase):
         pass  # commit handled in dialog via EVT_GRID_CELL_CHANGED
 
     def GetAttr(self, row: int, col: int, kind) -> wx.grid.GridCellAttr | None:  # noqa: N802
+        if col == self._btn_col:
+            self._btn_attr.IncRef()
+            return self._btn_attr
         if col not in self._editable_cols:
             self._ro_attr.IncRef()
             return self._ro_attr
@@ -137,9 +172,10 @@ class _ResultGrid(wx.grid.Grid):
         columns: list[tuple[str, int]],
         field_fn,
         editable_cols=frozenset(),
+        btn_col: int = -1,
     ) -> None:
         super().__init__(parent)
-        self._table = _ResultTableBase(columns, field_fn, editable_cols)
+        self._table = _ResultTableBase(columns, field_fn, editable_cols, btn_col=btn_col)
         self.SetTable(self._table, takeOwnership=False)
         self.SetRowLabelSize(0)
         self.DisableDragRowSize()
@@ -149,6 +185,207 @@ class _ResultGrid(wx.grid.Grid):
 
     def set_results(self, results: list) -> None:
         self._table.set_results(results)
+
+
+class _CopyToLibraryDialog(wx.Dialog):
+    """Modal dialog for copying a symbol from a read-only library into a writable one.
+
+    Presents a file path input with Browse (pick existing) and New Library (create
+    empty) buttons.  On OK the symbol s-expression is copied into the destination
+    file and the DB is re-indexed for that library.
+
+    Public attributes set on wx.ID_OK:
+        dest_library_path (str)  — absolute path of the destination .kicad_sym
+        dest_symbol_id    (int)  — DB id of the newly inserted symbol row
+    """
+
+    def __init__(self, parent, result, db_path: str, resolve_fn) -> None:
+        super().__init__(
+            parent,
+            title="Copy Symbol to Editable Library",
+            style=wx.DEFAULT_DIALOG_STYLE,
+        )
+        self._result = result
+        self._db_path = db_path
+        self._resolve_fn = resolve_fn
+        self.dest_library_path: str = ""
+        self.dest_symbol_id: int = 0
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        panel = wx.Panel(self)
+        outer = wx.BoxSizer(wx.VERTICAL)
+
+        # Path label + text input
+        outer.Add(
+            wx.StaticText(panel, label="Library file:"),
+            flag=wx.LEFT | wx.TOP, border=10,
+        )
+        self._path_input = wx.TextCtrl(panel, size=(420, -1))
+        outer.Add(self._path_input, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=10)
+
+        # Browse / New Library buttons
+        btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        browse_btn = wx.Button(panel, label="Browse\u2026")
+        new_btn = wx.Button(panel, label="New Library\u2026")
+        browse_btn.Bind(wx.EVT_BUTTON, self._on_browse)
+        new_btn.Bind(wx.EVT_BUTTON, self._on_new_library)
+        btn_sizer.Add(browse_btn, flag=wx.RIGHT, border=6)
+        btn_sizer.Add(new_btn)
+        outer.Add(btn_sizer, flag=wx.LEFT | wx.TOP, border=10)
+
+        # Symbol name
+        outer.Add(
+            wx.StaticText(panel, label="Symbol name:"),
+            flag=wx.LEFT | wx.TOP, border=10,
+        )
+        self._name_input = wx.TextCtrl(
+            panel, value=self._result.symbol_raw_name, size=(420, -1),
+        )
+        outer.Add(self._name_input, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=10)
+
+        # OK / Cancel
+        outer.AddSpacer(10)
+        outer.Add(wx.StaticLine(panel), flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10)
+        std_btns = wx.StdDialogButtonSizer()
+        self._ok_btn = wx.Button(panel, wx.ID_OK)
+        self._ok_btn.Disable()
+        cancel_btn = wx.Button(panel, wx.ID_CANCEL)
+        std_btns.AddButton(self._ok_btn)
+        std_btns.AddButton(cancel_btn)
+        std_btns.Realize()
+        outer.Add(std_btns, flag=wx.ALL, border=10)
+
+        self._ok_btn.Bind(wx.EVT_BUTTON, self._on_ok)
+        self._path_input.Bind(wx.EVT_TEXT, self._on_input_changed)
+        self._name_input.Bind(wx.EVT_TEXT, self._on_input_changed)
+
+        panel.SetSizer(outer)
+        outer.Fit(panel)
+        self.Fit()
+        self.Centre()
+
+    def _on_input_changed(self, _event: wx.Event) -> None:
+        ok = bool(self._path_input.GetValue().strip()
+                  and self._name_input.GetValue().strip())
+        self._ok_btn.Enable(ok)
+
+    def _on_browse(self, _event: wx.Event) -> None:
+        with wx.FileDialog(
+            self,
+            "Select a KiCad symbol library",
+            wildcard="KiCad symbol libraries (*.kicad_sym)|*.kicad_sym",
+            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+        ) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                self._path_input.SetValue(dlg.GetPath())
+
+    def _on_new_library(self, _event: wx.Event) -> None:
+        with wx.FileDialog(
+            self,
+            "Create a new KiCad symbol library",
+            wildcard="KiCad symbol libraries (*.kicad_sym)|*.kicad_sym",
+            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+        ) as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            path = dlg.GetPath()
+            if not path.endswith(".kicad_sym"):
+                path += ".kicad_sym"
+            try:
+                import kicad_sym as _ks
+                empty_lib = _ks.library()
+                _ks.save(path, empty_lib)
+            except Exception as exc:
+                wx.MessageDialog(
+                    self,
+                    f"Could not create library file:\n{exc}",
+                    "Error",
+                    wx.OK | wx.ICON_ERROR,
+                ).ShowModal()
+                return
+            self._path_input.SetValue(path)
+
+    def _on_ok(self, _event: wx.Event) -> None:
+        dest_path = self._path_input.GetValue().strip()
+        dest_name = self._name_input.GetValue().strip()
+        if not dest_path:
+            return
+        if not dest_path.endswith(".kicad_sym"):
+            wx.MessageDialog(
+                self,
+                "Please choose a file with a .kicad_sym extension.",
+                "Invalid file",
+                wx.OK | wx.ICON_WARNING,
+            ).ShowModal()
+            return
+        if not dest_name:
+            wx.MessageDialog(
+                self,
+                "Please enter a symbol name.",
+                "Invalid name",
+                wx.OK | wx.ICON_WARNING,
+            ).ShowModal()
+            return
+        if self._copy_symbol_to_library(dest_path, dest_name):
+            self.EndModal(wx.ID_OK)
+
+    def _copy_symbol_to_library(self, dest_path: str, dest_name: str) -> bool:
+        """Copy symbol s-expression to dest_path and re-index in the DB.
+
+        Returns True on success, False on any error (error shown in a dialog).
+        """
+        import kicad_sym as _ks
+        from pathlib import Path
+        from kicaddy import db as _db
+        from kicaddy import parser as _parser
+        from kicaddy.models import LibraryType
+
+        try:
+            # Step 1: copy s-expression into destination file
+            src_path = self._resolve_fn(self._result.library_path)
+            src_lib = _ks.load(src_path)
+            sym_node = _ks.get_symbol(src_lib, self._result.symbol_raw_name)
+            cloned = _ks.clone(sym_node)
+            # Apply rename: update both the s-expression element and Python attribute
+            cloned[1] = dest_name
+            cloned.name = dest_name
+
+            dest = Path(dest_path)
+            dest_lib = _ks.load(dest) if dest.exists() else _ks.library()
+            dest_lib.append(cloned)
+            _ks.save(dest, dest_lib)
+
+            # Step 2: re-index the destination library into the DB
+            library, symbols = _parser.parse_library_file(
+                dest, dest_path, LibraryType.SYMBOL, name=dest.stem,
+            )
+            conn = _db.get_connection(self._db_path)
+            conn.execute("BEGIN")
+            lib_id = _db.upsert_library(conn, library)
+            new_symbol_id = None
+            for sym in symbols:
+                sym.library_id = lib_id
+                sid = _db.insert_symbol(conn, sym)
+                _db.insert_symbol_properties(conn, sid, sym.extra_properties)
+                if sym.name == dest_name:
+                    new_symbol_id = sid
+            _db.link_symbols_to_footprints(conn)
+            _db.insert_parts_from_links(conn)
+            conn.commit()
+            conn.close()
+        except Exception as exc:
+            wx.MessageDialog(
+                self,
+                f"Failed to copy symbol:\n{exc}",
+                "Error",
+                wx.OK | wx.ICON_ERROR,
+            ).ShowModal()
+            return False
+
+        self.dest_library_path = dest_path
+        self.dest_symbol_id = new_symbol_id or 0
+        return True
 
 
 class _PreviewPanel(wx.Panel):
@@ -230,7 +467,7 @@ class SearchDialog(wx.Dialog):
 
         # Parts tab: splitter with grid on left, 3D preview on right
         parts_splitter = wx.SplitterWindow(self._notebook, style=wx.SP_LIVE_UPDATE)
-        self._parts_grid = _ResultGrid(parts_splitter, _PART_COLUMNS, _part_field, _EDITABLE_PART_COLS)
+        self._parts_grid = _ResultGrid(parts_splitter, _PART_COLUMNS, _part_field, _EDITABLE_PART_COLS, btn_col=0)
         self._preview_panel = _PreviewPanel(parts_splitter)
         parts_splitter.SplitVertically(self._parts_grid, self._preview_panel, sashPosition=1010)
         parts_splitter.SetMinimumPaneSize(200)
@@ -246,8 +483,10 @@ class SearchDialog(wx.Dialog):
 
         self._parts_grid.Bind(wx.grid.EVT_GRID_SELECT_CELL, self._on_part_selected)
         self._parts_grid.Bind(wx.grid.EVT_GRID_CELL_LEFT_DCLICK, self._on_item_activated)
+        self._parts_grid.Bind(wx.grid.EVT_GRID_CELL_LEFT_CLICK, self._on_parts_cell_click)
         self._parts_grid.Bind(wx.grid.EVT_GRID_CELL_CHANGING, self._on_parts_cell_changing)
         self._parts_grid.Bind(wx.grid.EVT_GRID_CELL_CHANGED, self._on_parts_cell_changed)
+        self._parts_grid.GetGridWindow().Bind(wx.EVT_MOTION, self._on_parts_grid_motion)
         for g in (self._symbols_grid, self._footprints_grid):
             g.Bind(wx.grid.EVT_GRID_CELL_LEFT_DCLICK, self._on_item_activated)
 
@@ -471,6 +710,31 @@ class SearchDialog(wx.Dialog):
             error=False,
         )
 
+    def _on_parts_cell_click(self, event: wx.grid.GridEvent) -> None:
+        if event.GetCol() != 0:
+            event.Skip()
+            return
+        row = event.GetRow()
+        results = self._parts_grid._table._results
+        if row >= len(results):
+            return
+        result = results[row]
+        if result.permissions != "ro":
+            return
+        self._make_library_editable(result)
+
+    def _on_parts_grid_motion(self, event: wx.MouseEvent) -> None:
+        x, y = self._parts_grid.CalcUnscrolledPosition(event.GetPosition())
+        col = self._parts_grid.XToCol(x)
+        row = self._parts_grid.YToRow(y)
+        results = self._parts_grid._table._results
+        if (col == 0 and 0 <= row < len(results)
+                and results[row].permissions == "ro"):
+            self._parts_grid.GetGridWindow().SetToolTip("Make Editable")
+        else:
+            self._parts_grid.GetGridWindow().SetToolTip("")
+        event.Skip()
+
     def _on_close(self, _event: wx.Event) -> None:
         self.EndModal(wx.ID_CANCEL)
 
@@ -530,6 +794,17 @@ class SearchDialog(wx.Dialog):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _make_library_editable(self, result) -> None:
+        db_path = self._db_path_input.GetValue().strip()
+        dlg = _CopyToLibraryDialog(self, result, db_path, self._resolve_library_path)
+        if dlg.ShowModal() == wx.ID_OK:
+            result.library_path = dlg.dest_library_path
+            result.symbol_id = dlg.dest_symbol_id
+            result.permissions = "rw"
+            self._parts_grid.ForceRefresh()
+            self._set_status(f"Symbol copied to {dlg.dest_library_path}", error=False)
+        dlg.Destroy()
 
     def _resolve_library_path(self, library_path: str) -> str:
         """Resolve a possibly-relative library_path against the DB file's directory."""

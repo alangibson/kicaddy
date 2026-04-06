@@ -35,16 +35,22 @@ def _make_result(**overrides) -> PartResult:
 
 
 def test_part_field_returns_correct_value_per_column():
-    r = _make_result()
-    assert _part_field(r, 0) == "MyLib"
-    assert _part_field(r, 1) == "MySym"
-    assert _part_field(r, 2) == "MyLib:MyFP"
-    assert _part_field(r, 3) == "A test part"
-    assert _part_field(r, 4) == "MPN-001"
-    assert _part_field(r, 5) == "DK-001"
-    assert _part_field(r, 6) == "MS-001"
-    assert _part_field(r, 7) == "TME-001"
-    assert _part_field(r, 8) == "LCSC-001"
+    r = _make_result(permissions="ro")
+    assert _part_field(r, 0) == "E"        # button column: ro library shows "E"
+    assert _part_field(r, 1) == "MyLib"
+    assert _part_field(r, 2) == "MySym"
+    assert _part_field(r, 3) == "MyLib:MyFP"
+    assert _part_field(r, 4) == "A test part"
+    assert _part_field(r, 5) == "MPN-001"
+    assert _part_field(r, 6) == "DK-001"
+    assert _part_field(r, 7) == "MS-001"
+    assert _part_field(r, 8) == "TME-001"
+    assert _part_field(r, 9) == "LCSC-001"
+
+
+def test_part_field_button_col_hidden_for_rw_library():
+    r = _make_result(permissions="rw")
+    assert _part_field(r, 0) == ""         # rw library: no button
 
 
 def test_part_field_column_count_matches_part_columns():
