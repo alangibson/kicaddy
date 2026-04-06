@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import wx
 import wx.grid
-import wx.svg
+
+logger = logging.getLogger(__name__)
 
 from . import config
 from .search import PartResult, SearchResult, run_search, search_parts, update_part_supplier_field
@@ -152,31 +154,68 @@ class _ResultGrid(wx.grid.Grid):
 
 
 class _PreviewPanel(wx.Panel):
-    """Right-hand panel in the Parts tab that shows a 3D model preview."""
+    """Right-hand panel in the Parts tab that shows a 3D model preview via OCCT."""
 
     def __init__(self, parent: wx.Window) -> None:
         super().__init__(parent)
-        self._bitmap = wx.StaticBitmap(self)
+        self._occ_viewer = None
+        self._occ_available: bool | None = None  # None = not yet attempted
+
         self._label = wx.StaticText(self, label="Select a part to preview 3D model")
         self._label.SetForegroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT))
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.AddStretchSpacer()
-        sizer.Add(self._bitmap, flag=wx.ALIGN_CENTER | wx.ALL, border=4)
-        sizer.Add(self._label, flag=wx.ALIGN_CENTER | wx.ALL, border=4)
-        sizer.AddStretchSpacer()
-        self.SetSizer(sizer)
+        self._sizer = wx.BoxSizer(wx.VERTICAL)
+        self._sizer.AddStretchSpacer()
+        self._sizer.Add(self._label, flag=wx.ALIGN_CENTER | wx.ALL, border=4)
+        self._sizer.AddStretchSpacer()
+        self.SetSizer(self._sizer)
 
-    def show_svg(self, svg_str: str) -> None:
-        pw, ph = self.GetSize()
-        size = max(min(pw, ph) - 16, 100)
-        svg_img = wx.svg.SVGimage.CreateFromBytes(svg_str.encode())
-        bmp = svg_img.ConvertToScaledBitmap(wx.Size(size, size), self)
-        self._bitmap.SetBitmap(bmp)
-        self._label.SetLabel("")
+    def _ensure_viewer(self) -> bool:
+        """Lazy-initialize the OCCT viewer on first use. Returns True if available."""
+        if self._occ_available is not None:
+            return self._occ_available
+        try:
+            from OCC.Display.wxDisplay import wxBaseViewer
+            self._occ_viewer = wxBaseViewer(self)
+            self._occ_viewer.InitDriver()
+            self._sizer.Insert(0, self._occ_viewer, proportion=1, flag=wx.EXPAND)
+            self._occ_viewer.Hide()
+            self.Layout()
+            self._occ_available = True
+        except Exception as exc:
+            logger.warning("OCCT viewer unavailable: %s", exc)
+            self._occ_available = False
+        return self._occ_available
+
+    def show_step(self, step_path: str) -> None:
+        """Load and display a STEP file using OCCT."""
+        if not self._ensure_viewer():
+            self._label.SetLabel("Install pythonocc-core for 3D preview")
+            self.Layout()
+            return
+        try:
+            from OCC.Core.STEPControl import STEPControl_Reader
+            reader = STEPControl_Reader()
+            status = reader.ReadFile(step_path)
+            if status == 1:  # IFSelect_RetDone
+                reader.TransferRoots()
+                shape = reader.OneShape()
+                self._occ_viewer._display.EraseAll()
+                self._occ_viewer._display.DisplayShape(shape, update=True)
+                self._occ_viewer.Show()
+                self._label.SetLabel("")
+            else:
+                self._label.SetLabel("Failed to load STEP file")
+                self._occ_viewer.Hide()
+        except Exception as exc:
+            logger.warning("OCCT render error for %s: %s", step_path, exc)
+            self._label.SetLabel(f"3D preview error: {exc}")
+            if self._occ_viewer is not None:
+                self._occ_viewer.Hide()
         self.Layout()
 
     def show_message(self, msg: str) -> None:
-        self._bitmap.SetBitmap(wx.NullBitmap)
+        if self._occ_viewer is not None:
+            self._occ_viewer.Hide()
         self._label.SetLabel(msg)
         self.Layout()
 
@@ -389,10 +428,9 @@ class SearchDialog(wx.Dialog):
         if row >= len(results):
             event.Skip()
             return
-        svg = results[row].svg_path
-        if svg and os.path.isfile(svg):
-            with open(svg) as f:
-                self._preview_panel.show_svg(f.read())
+        model_path = results[row].model_path
+        if model_path and os.path.isfile(model_path):
+            self._preview_panel.show_step(model_path)
         else:
             self._preview_panel.show_message("No 3D model available")
         event.Skip()

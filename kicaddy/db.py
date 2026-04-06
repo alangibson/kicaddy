@@ -311,13 +311,13 @@ def insert_solid(conn: sqlite3.Connection, model: Solid) -> int:
     cur = conn.execute(
         """
         INSERT INTO solid (footprint_id, model_path, svg_path)
-        VALUES (?, ?, ?)
+        VALUES (?, ?, '')
         ON CONFLICT(footprint_id) DO UPDATE SET
             model_path = excluded.model_path,
-            svg_path   = excluded.svg_path
+            svg_path   = ''
         RETURNING id
         """,
-        (model.footprint_id, model.model_path, model.svg_path),
+        (model.footprint_id, model.model_path),
     )
     row = cur.fetchone()
     model.id = row[0]

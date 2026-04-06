@@ -23,7 +23,6 @@ class PartResult:
     description: str
     mpn: str
     model_path: str = ""  # resolved absolute path to STEP file, empty if none
-    svg_path: str = ""    # absolute path to cached SVG render, empty if not rendered
     symbol_id: int = 0          # symbol.id — needed for in-place DB edits
     symbol_raw_name: str = ""   # symbol.name — raw name inside the .kicad_sym file
     library_path: str = ""      # library.library_path — for writability check
@@ -145,7 +144,6 @@ SELECT DISTINCT
     s.description,
     COALESCE(s.mpn, '')                                                 AS mpn,
     COALESCE(sol.model_path, '')                                        AS model_path,
-    COALESCE(sol.svg_path, '')                                          AS svg_path,
     s.id                                                                AS symbol_id,
     s.name                                                              AS symbol_raw_name,
     l.library_path                                                      AS library_path,
@@ -264,14 +262,13 @@ def search_parts(db_path: str, pattern: str) -> list[PartResult]:
             description=row[3] or "",
             mpn=row[4] or "",
             model_path=row[5] or "",
-            svg_path=row[6] or "",
-            symbol_id=row[7] or 0,
-            symbol_raw_name=row[8] or "",
-            library_path=row[9] or "",
-            digikey_pn=row[10] or "",
-            mouser_pn=row[11] or "",
-            tme_pn=row[12] or "",
-            lcsc_pn=row[13] or "",
+            symbol_id=row[6] or 0,
+            symbol_raw_name=row[7] or "",
+            library_path=row[8] or "",
+            digikey_pn=row[9] or "",
+            mouser_pn=row[10] or "",
+            tme_pn=row[11] or "",
+            lcsc_pn=row[12] or "",
         )
         for row in rows
     ]

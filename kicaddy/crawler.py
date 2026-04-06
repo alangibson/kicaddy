@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
-from kicaddy import db, libtable, parser, render
+from kicaddy import db, libtable, parser
 from kicaddy.models import LibraryType
 
 logger = logging.getLogger(__name__)
@@ -144,8 +144,6 @@ def crawl_and_index(
                 db.insert_footprint_properties(conn, footprint.id, footprint.extra_properties)
                 if footprint.solid is not None:
                     footprint.solid.footprint_id = footprint.id
-                    model_path = footprint.solid.model_path
-                    footprint.solid.svg_path = render.render_step_to_svg(model_path) or ""
                     db.insert_solid(conn, footprint.solid)
                 stats.footprints_indexed += 1
                 pending_commits += 1
@@ -276,8 +274,6 @@ def crawl_from_lib_tables(
                 db.insert_footprint_properties(conn, footprint.id, footprint.extra_properties)
                 if footprint.solid is not None:
                     footprint.solid.footprint_id = footprint.id
-                    model_path = footprint.solid.model_path
-                    footprint.solid.svg_path = render.render_step_to_svg(model_path) or ""
                     db.insert_solid(conn, footprint.solid)
                 stats.footprints_indexed += 1
                 pending_commits += 1

@@ -1,8 +1,8 @@
 # Core
 kicad-sym
 
-# 3D rendering (for Parts tab STEP preview)
-cadquery
+# 3D rendering (for Parts tab STEP preview via OCCT)
+pythonocc-core
 
 # wxPython (for KiCad plugin UI)
 wxPython
