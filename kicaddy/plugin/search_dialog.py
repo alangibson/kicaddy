@@ -633,16 +633,14 @@ class SearchDialog(wx.Dialog):
         if result.svg:
             self._preview_panel.show_svg(result.svg)
         elif result.model_path:
-            svg_file = render.render_step_to_svg(result.model_path)
-            if svg_file and os.path.isfile(svg_file):
-                with open(svg_file) as f:
-                    svg_content = f.read()
+            svg_content = render.render_step_to_svg(result.model_path)
+            if svg_content:
                 result.svg = svg_content
                 db_path = self._db_path_input.GetValue().strip()
                 if db_path and result.footprint_id:
                     try:
                         update_solid_svg(db_path, result.footprint_id, svg_content)
-                    except Exception as exc:
+                    except Exception:
                         pass  # non-fatal: display still works, cache just won't persist
                 self._preview_panel.show_svg(svg_content)
             else:
