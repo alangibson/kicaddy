@@ -234,6 +234,16 @@ class _CopyToLibraryDialog(wx.Dialog):
         btn_sizer.Add(new_btn)
         outer.Add(btn_sizer, flag=wx.LEFT | wx.TOP, border=10)
 
+        # Symbol name
+        outer.Add(
+            wx.StaticText(panel, label="Symbol name:"),
+            flag=wx.LEFT | wx.TOP, border=10,
+        )
+        self._name_input = wx.TextCtrl(
+            panel, value=self._result.symbol_raw_name, size=(420, -1),
+        )
+        outer.Add(self._name_input, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=10)
+
         # OK / Cancel
         outer.AddSpacer(10)
         outer.Add(wx.StaticLine(panel), flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10)
@@ -247,15 +257,18 @@ class _CopyToLibraryDialog(wx.Dialog):
         outer.Add(std_btns, flag=wx.ALL, border=10)
 
         self._ok_btn.Bind(wx.EVT_BUTTON, self._on_ok)
-        self._path_input.Bind(wx.EVT_TEXT, self._on_path_changed)
+        self._path_input.Bind(wx.EVT_TEXT, self._on_input_changed)
+        self._name_input.Bind(wx.EVT_TEXT, self._on_input_changed)
 
         panel.SetSizer(outer)
         outer.Fit(panel)
         self.Fit()
         self.Centre()
 
-    def _on_path_changed(self, _event: wx.Event) -> None:
-        self._ok_btn.Enable(bool(self._path_input.GetValue().strip()))
+    def _on_input_changed(self, _event: wx.Event) -> None:
+        ok = bool(self._path_input.GetValue().strip()
+                  and self._name_input.GetValue().strip())
+        self._ok_btn.Enable(ok)
 
     def _on_browse(self, _event: wx.Event) -> None:
         with wx.FileDialog(
@@ -295,6 +308,7 @@ class _CopyToLibraryDialog(wx.Dialog):
 
     def _on_ok(self, _event: wx.Event) -> None:
         dest_path = self._path_input.GetValue().strip()
+        dest_name = self._name_input.GetValue().strip()
         if not dest_path:
             return
         if not dest_path.endswith(".kicad_sym"):
@@ -305,10 +319,18 @@ class _CopyToLibraryDialog(wx.Dialog):
                 wx.OK | wx.ICON_WARNING,
             ).ShowModal()
             return
-        if self._copy_symbol_to_library(dest_path):
+        if not dest_name:
+            wx.MessageDialog(
+                self,
+                "Please enter a symbol name.",
+                "Invalid name",
+                wx.OK | wx.ICON_WARNING,
+            ).ShowModal()
+            return
+        if self._copy_symbol_to_library(dest_path, dest_name):
             self.EndModal(wx.ID_OK)
 
-    def _copy_symbol_to_library(self, dest_path: str) -> bool:
+    def _copy_symbol_to_library(self, dest_path: str, dest_name: str) -> bool:
         """Copy symbol s-expression to dest_path and re-index in the DB.
 
         Returns True on success, False on any error (error shown in a dialog).
@@ -325,6 +347,9 @@ class _CopyToLibraryDialog(wx.Dialog):
             src_lib = _ks.load(src_path)
             sym_node = _ks.get_symbol(src_lib, self._result.symbol_raw_name)
             cloned = _ks.clone(sym_node)
+            # Apply rename: update both the s-expression element and Python attribute
+            cloned[1] = dest_name
+            cloned.name = dest_name
 
             dest = Path(dest_path)
             dest_lib = _ks.load(dest) if dest.exists() else _ks.library()
@@ -343,7 +368,7 @@ class _CopyToLibraryDialog(wx.Dialog):
                 sym.library_id = lib_id
                 sid = _db.insert_symbol(conn, sym)
                 _db.insert_symbol_properties(conn, sid, sym.extra_properties)
-                if sym.name == self._result.symbol_raw_name:
+                if sym.name == dest_name:
                     new_symbol_id = sid
             _db.link_symbols_to_footprints(conn)
             _db.insert_parts_from_links(conn)
