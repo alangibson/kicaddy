@@ -2,7 +2,8 @@
 kicad-sym
 
 # 3D rendering (for Parts tab STEP preview via OCCT)
-pythonocc-core
+# pythonocc-core is NOT on PyPI — install via conda:
+#   conda install -c conda-forge pythonocc-core
 
 # wxPython (for KiCad plugin UI)
 wxPython
