@@ -89,7 +89,6 @@ def crawl_and_index(
         library, symbols = parser.parse_library_file(
             abs_path, str(abs_path), LibraryType.SYMBOL, name=abs_path.stem
         )
-        library.permissions = "rw" if os.access(abs_path, os.W_OK) else "ro"
 
         try:
             library_id = db.upsert_library(conn, library)
@@ -130,7 +129,6 @@ def crawl_and_index(
         logger.info("Indexing footprint library %s", rel_path)
 
         library, footprints = parser.parse_footprint_library_dir(abs_path, str(abs_path), name=abs_path.stem)
-        library.permissions = "rw" if os.access(abs_path, os.W_OK) else "ro"
 
         try:
             library_id = db.upsert_library(conn, library)
@@ -228,7 +226,6 @@ def crawl_from_lib_tables(
         logger.info("Indexing %s", abs_path.name)
 
         library, symbols = parser.parse_library_file(abs_path, str(abs_path), LibraryType.SYMBOL, name=lib_name)
-        library.permissions = "rw" if os.access(abs_path, os.W_OK) else "ro"
 
         try:
             library_id = db.upsert_library(conn, library)
@@ -264,7 +261,6 @@ def crawl_from_lib_tables(
         logger.info("Indexing footprint library %s", abs_path.name)
 
         library, footprints = parser.parse_footprint_library_dir(abs_path, str(abs_path), name=lib_name)
-        library.permissions = "rw" if os.access(abs_path, os.W_OK) else "ro"
 
         try:
             library_id = db.upsert_library(conn, library)

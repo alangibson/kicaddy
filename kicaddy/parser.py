@@ -268,6 +268,7 @@ def _extract_library_metadata(
         generator=generator,
         generator_version=generator_version,
         name=name,
+        permissions="rw" if os.access(library_path, os.W_OK) else "ro",
     )
 
 
@@ -279,6 +280,7 @@ def _empty_library(library_path: str, library_type: LibraryType, name: str) -> L
         generator="",
         generator_version="",
         name=name,
+        permissions="rw" if os.access(library_path, os.W_OK) else "ro",
     )
 
 
@@ -376,6 +378,7 @@ def parse_footprint_library_dir(
         generator="",
         generator_version="",
         name=name,
+        permissions="rw" if os.access(library_path, os.W_OK) else "ro",
     )
 
     library_name = Path(library_path).stem
