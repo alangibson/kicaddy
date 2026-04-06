@@ -187,6 +187,182 @@ class _ResultGrid(wx.grid.Grid):
         self._table.set_results(results)
 
 
+class _CopyToLibraryDialog(wx.Dialog):
+    """Modal dialog for copying a symbol from a read-only library into a writable one.
+
+    Presents a file path input with Browse (pick existing) and New Library (create
+    empty) buttons.  On OK the symbol s-expression is copied into the destination
+    file and the DB is re-indexed for that library.
+
+    Public attributes set on wx.ID_OK:
+        dest_library_path (str)  — absolute path of the destination .kicad_sym
+        dest_symbol_id    (int)  — DB id of the newly inserted symbol row
+    """
+
+    def __init__(self, parent, result, db_path: str, resolve_fn) -> None:
+        super().__init__(
+            parent,
+            title="Copy Symbol to Editable Library",
+            style=wx.DEFAULT_DIALOG_STYLE,
+        )
+        self._result = result
+        self._db_path = db_path
+        self._resolve_fn = resolve_fn
+        self.dest_library_path: str = ""
+        self.dest_symbol_id: int = 0
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        panel = wx.Panel(self)
+        outer = wx.BoxSizer(wx.VERTICAL)
+
+        # Path label + text input
+        outer.Add(
+            wx.StaticText(panel, label="Library file:"),
+            flag=wx.LEFT | wx.TOP, border=10,
+        )
+        self._path_input = wx.TextCtrl(panel, size=(420, -1))
+        outer.Add(self._path_input, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=10)
+
+        # Browse / New Library buttons
+        btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        browse_btn = wx.Button(panel, label="Browse\u2026")
+        new_btn = wx.Button(panel, label="New Library\u2026")
+        browse_btn.Bind(wx.EVT_BUTTON, self._on_browse)
+        new_btn.Bind(wx.EVT_BUTTON, self._on_new_library)
+        btn_sizer.Add(browse_btn, flag=wx.RIGHT, border=6)
+        btn_sizer.Add(new_btn)
+        outer.Add(btn_sizer, flag=wx.LEFT | wx.TOP, border=10)
+
+        # OK / Cancel
+        outer.AddSpacer(10)
+        outer.Add(wx.StaticLine(panel), flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10)
+        std_btns = wx.StdDialogButtonSizer()
+        self._ok_btn = wx.Button(panel, wx.ID_OK)
+        self._ok_btn.Disable()
+        cancel_btn = wx.Button(panel, wx.ID_CANCEL)
+        std_btns.AddButton(self._ok_btn)
+        std_btns.AddButton(cancel_btn)
+        std_btns.Realize()
+        outer.Add(std_btns, flag=wx.ALL, border=10)
+
+        self._ok_btn.Bind(wx.EVT_BUTTON, self._on_ok)
+        self._path_input.Bind(wx.EVT_TEXT, self._on_path_changed)
+
+        panel.SetSizer(outer)
+        outer.Fit(panel)
+        self.Fit()
+        self.Centre()
+
+    def _on_path_changed(self, _event: wx.Event) -> None:
+        self._ok_btn.Enable(bool(self._path_input.GetValue().strip()))
+
+    def _on_browse(self, _event: wx.Event) -> None:
+        with wx.FileDialog(
+            self,
+            "Select a KiCad symbol library",
+            wildcard="KiCad symbol libraries (*.kicad_sym)|*.kicad_sym",
+            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+        ) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                self._path_input.SetValue(dlg.GetPath())
+
+    def _on_new_library(self, _event: wx.Event) -> None:
+        with wx.FileDialog(
+            self,
+            "Create a new KiCad symbol library",
+            wildcard="KiCad symbol libraries (*.kicad_sym)|*.kicad_sym",
+            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+        ) as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            path = dlg.GetPath()
+            if not path.endswith(".kicad_sym"):
+                path += ".kicad_sym"
+            try:
+                import kicad_sym as _ks
+                empty_lib = _ks.library()
+                _ks.save(path, empty_lib)
+            except Exception as exc:
+                wx.MessageDialog(
+                    self,
+                    f"Could not create library file:\n{exc}",
+                    "Error",
+                    wx.OK | wx.ICON_ERROR,
+                ).ShowModal()
+                return
+            self._path_input.SetValue(path)
+
+    def _on_ok(self, _event: wx.Event) -> None:
+        dest_path = self._path_input.GetValue().strip()
+        if not dest_path:
+            return
+        if not dest_path.endswith(".kicad_sym"):
+            wx.MessageDialog(
+                self,
+                "Please choose a file with a .kicad_sym extension.",
+                "Invalid file",
+                wx.OK | wx.ICON_WARNING,
+            ).ShowModal()
+            return
+        if self._copy_symbol_to_library(dest_path):
+            self.EndModal(wx.ID_OK)
+
+    def _copy_symbol_to_library(self, dest_path: str) -> bool:
+        """Copy symbol s-expression to dest_path and re-index in the DB.
+
+        Returns True on success, False on any error (error shown in a dialog).
+        """
+        import kicad_sym as _ks
+        from pathlib import Path
+        from kicaddy import db as _db
+        from kicaddy import parser as _parser
+        from kicaddy.models import LibraryType
+
+        try:
+            # Step 1: copy s-expression into destination file
+            src_path = self._resolve_fn(self._result.library_path)
+            src_lib = _ks.load(src_path)
+            sym_node = _ks.get_symbol(src_lib, self._result.symbol_raw_name)
+            cloned = _ks.clone(sym_node)
+
+            dest = Path(dest_path)
+            dest_lib = _ks.load(dest) if dest.exists() else _ks.library()
+            dest_lib.append(cloned)
+            _ks.save(dest, dest_lib)
+
+            # Step 2: re-index the destination library into the DB
+            library, symbols = _parser.parse_library_file(
+                dest, dest_path, LibraryType.SYMBOL, name=dest.stem,
+            )
+            conn = _db.get_connection(self._db_path)
+            conn.execute("BEGIN")
+            lib_id = _db.upsert_library(conn, library)
+            new_symbol_id = None
+            for sym in symbols:
+                sym.library_id = lib_id
+                sid = _db.insert_symbol(conn, sym)
+                _db.insert_symbol_properties(conn, sid, sym.extra_properties)
+                if sym.name == self._result.symbol_raw_name:
+                    new_symbol_id = sid
+            _db.link_symbols_to_footprints(conn)
+            _db.insert_parts_from_links(conn)
+            conn.commit()
+            conn.close()
+        except Exception as exc:
+            wx.MessageDialog(
+                self,
+                f"Failed to copy symbol:\n{exc}",
+                "Error",
+                wx.OK | wx.ICON_ERROR,
+            ).ShowModal()
+            return False
+
+        self.dest_library_path = dest_path
+        self.dest_symbol_id = new_symbol_id or 0
+        return True
+
+
 class _PreviewPanel(wx.Panel):
     """Right-hand panel in the Parts tab that shows a 3D model preview."""
 
@@ -595,27 +771,15 @@ class SearchDialog(wx.Dialog):
     # ------------------------------------------------------------------
 
     def _make_library_editable(self, result) -> None:
-        import stat
-        lib_path = self._resolve_library_path(result.library_path)
-        try:
-            current_mode = os.stat(lib_path).st_mode
-            os.chmod(lib_path, current_mode | stat.S_IRUSR | stat.S_IWUSR)
-        except Exception as exc:
-            self._set_status(f"Could not make library editable: {exc}", error=True)
-            return
         db_path = self._db_path_input.GetValue().strip()
-        try:
-            from kicaddy import db as _db
-            conn = _db.get_connection(db_path)
-            conn.execute("UPDATE library SET permissions='rw' WHERE library_path=?", (result.library_path,))
-            conn.commit()
-            conn.close()
-        except Exception as exc:
-            self._set_status(f"File is now writable but DB update failed: {exc}", error=True)
-            return
-        result.permissions = "rw"
-        self._parts_grid.ForceRefresh()
-        self._set_status(f"Library is now editable: {lib_path}", error=False)
+        dlg = _CopyToLibraryDialog(self, result, db_path, self._resolve_library_path)
+        if dlg.ShowModal() == wx.ID_OK:
+            result.library_path = dlg.dest_library_path
+            result.symbol_id = dlg.dest_symbol_id
+            result.permissions = "rw"
+            self._parts_grid.ForceRefresh()
+            self._set_status(f"Symbol copied to {dlg.dest_library_path}", error=False)
+        dlg.Destroy()
 
     def _resolve_library_path(self, library_path: str) -> str:
         """Resolve a possibly-relative library_path against the DB file's directory."""
