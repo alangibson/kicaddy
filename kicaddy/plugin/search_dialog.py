@@ -7,7 +7,8 @@ import wx.grid
 import wx.svg
 
 from . import config
-from .search import PartResult, SearchResult, run_search, search_parts, update_part_supplier_field
+from .search import PartResult, SearchResult, run_search, search_parts, update_part_supplier_field, update_solid_svg
+from kicaddy import render
 from kicaddy.sym_writer import write_symbol_property
 
 # Grid column definitions per tab: list of (header, width)
@@ -628,10 +629,24 @@ class SearchDialog(wx.Dialog):
         if row >= len(results):
             event.Skip()
             return
-        svg = results[row].svg_path
-        if svg and os.path.isfile(svg):
-            with open(svg) as f:
-                self._preview_panel.show_svg(f.read())
+        result = results[row]
+        if result.svg:
+            self._preview_panel.show_svg(result.svg)
+        elif result.model_path:
+            svg_file = render.render_step_to_svg(result.model_path)
+            if svg_file and os.path.isfile(svg_file):
+                with open(svg_file) as f:
+                    svg_content = f.read()
+                result.svg = svg_content
+                db_path = self._db_path_input.GetValue().strip()
+                if db_path and result.footprint_id:
+                    try:
+                        update_solid_svg(db_path, result.footprint_id, svg_content)
+                    except Exception as exc:
+                        pass  # non-fatal: display still works, cache just won't persist
+                self._preview_panel.show_svg(svg_content)
+            else:
+                self._preview_panel.show_message("No 3D model available")
         else:
             self._preview_panel.show_message("No 3D model available")
         event.Skip()

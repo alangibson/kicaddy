@@ -22,8 +22,8 @@ class PartResult:
     footprint: str      # kicad_footprint_id
     description: str
     mpn: str
-    model_path: str = ""  # resolved absolute path to STEP file, empty if none
-    svg_path: str = ""    # absolute path to cached SVG render, empty if not rendered
+    model_path: str = ""        # resolved absolute path to STEP file, empty if none
+    svg: str | None = None      # cached SVG content from solid.svg, None if not yet rendered
     symbol_id: int = 0          # symbol.id — needed for in-place DB edits
     symbol_raw_name: str = ""   # symbol.name — raw name inside the .kicad_sym file
     library_path: str = ""      # library.library_path — for writability check
@@ -32,6 +32,7 @@ class PartResult:
     mouser_pn: str = ""
     tme_pn: str = ""
     lcsc_pn: str = ""
+    footprint_id: int = 0       # footprint.id — needed to write back to solid.svg
 
 
 # Search all text columns in symbol + symbol_property, and footprint + footprint_property.
@@ -146,7 +147,7 @@ SELECT DISTINCT
     s.description,
     COALESCE(s.mpn, '')                                                 AS mpn,
     COALESCE(sol.model_path, '')                                        AS model_path,
-    COALESCE(sol.svg_path, '')                                          AS svg_path,
+    sol.svg                                                             AS svg,
     s.id                                                                AS symbol_id,
     s.name                                                              AS symbol_raw_name,
     l.library_path                                                      AS library_path,
@@ -154,7 +155,8 @@ SELECT DISTINCT
     COALESCE(s.digikey_pn, '')                                          AS digikey_pn,
     COALESCE(s.mouser_pn,  '')                                          AS mouser_pn,
     COALESCE(s.tme_pn,     '')                                          AS tme_pn,
-    COALESCE(s.lcsc_pn,    '')                                          AS lcsc_pn
+    COALESCE(s.lcsc_pn,    '')                                          AS lcsc_pn,
+    p.footprint_id                                                      AS footprint_id
 FROM part p
 JOIN symbol s    ON s.id = p.symbol_id
 JOIN footprint f ON f.id = p.footprint_id
@@ -266,7 +268,7 @@ def search_parts(db_path: str, pattern: str) -> list[PartResult]:
             description=row[3] or "",
             mpn=row[4] or "",
             model_path=row[5] or "",
-            svg_path=row[6] or "",
+            svg=row[6],
             symbol_id=row[7] or 0,
             symbol_raw_name=row[8] or "",
             library_path=row[9] or "",
@@ -275,9 +277,29 @@ def search_parts(db_path: str, pattern: str) -> list[PartResult]:
             mouser_pn=row[12] or "",
             tme_pn=row[13] or "",
             lcsc_pn=row[14] or "",
+            footprint_id=row[15] or 0,
         )
         for row in rows
     ]
+
+
+def update_solid_svg(db_path: str, footprint_id: int, svg: str) -> None:
+    """Cache rendered SVG content in the database for the given footprint's solid.
+
+    Raises ValueError on database error.
+    """
+    from kicaddy import db as _db
+
+    try:
+        conn = _db.get_connection(db_path)
+    except Exception as exc:
+        raise ValueError(f"Cannot open database: {exc}") from exc
+    try:
+        _db.update_solid_svg(conn, footprint_id, svg)
+    except Exception as exc:
+        raise ValueError(f"Failed to save SVG: {exc}") from exc
+    finally:
+        conn.close()
 
 
 def update_part_supplier_field(

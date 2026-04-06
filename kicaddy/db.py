@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS solid (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     footprint_id INTEGER NOT NULL UNIQUE REFERENCES footprint(id) ON DELETE CASCADE,
     model_path   TEXT    NOT NULL DEFAULT '',
-    svg_path     TEXT    NOT NULL DEFAULT ''
+    svg          TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_solid_footprint_id
@@ -127,6 +127,14 @@ def create_schema(conn: sqlite3.Connection) -> None:
         pass
     try:
         conn.execute("ALTER TABLE part DROP COLUMN mpn")
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE solid DROP COLUMN svg_path")
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE solid ADD COLUMN svg TEXT")
     except Exception:
         pass
     conn.commit()
@@ -314,21 +322,27 @@ def insert_solid(conn: sqlite3.Connection, model: Solid) -> int:
     """
     Insert or replace a Solid row. Returns the row id.
     Populates model.id in-place.
+    On conflict, updates model_path but preserves any cached svg.
     """
     cur = conn.execute(
         """
-        INSERT INTO solid (footprint_id, model_path, svg_path)
+        INSERT INTO solid (footprint_id, model_path, svg)
         VALUES (?, ?, ?)
         ON CONFLICT(footprint_id) DO UPDATE SET
-            model_path = excluded.model_path,
-            svg_path   = excluded.svg_path
+            model_path = excluded.model_path
         RETURNING id
         """,
-        (model.footprint_id, model.model_path, model.svg_path),
+        (model.footprint_id, model.model_path, model.svg),
     )
     row = cur.fetchone()
     model.id = row[0]
     return model.id
+
+
+def update_solid_svg(conn: sqlite3.Connection, footprint_id: int, svg: str) -> None:
+    """Cache rendered SVG content for the solid associated with the given footprint."""
+    conn.execute("UPDATE solid SET svg = ? WHERE footprint_id = ?", (svg, footprint_id))
+    conn.commit()
 
 
 def link_symbols_to_footprints(conn: sqlite3.Connection) -> None:
