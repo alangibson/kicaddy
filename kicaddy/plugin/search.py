@@ -44,10 +44,9 @@ SELECT
     CASE WHEN s.kicad_library_id != '' THEN s.kicad_library_id
          ELSE s.name END                                               AS name,
     s.description,
-    COALESCE(p.mpn, '')                                                AS extra1,
+    ''                                                                 AS extra1,
     s.footprint                                                        AS extra2
 FROM symbol s
-LEFT JOIN part p ON p.symbol_id = s.id
 WHERE s.name             REGEXP ?
    OR s.extends          REGEXP ?
    OR s.kicad_library_id REGEXP ?
@@ -144,7 +143,7 @@ SELECT DISTINCT
          ELSE s.name END                                                AS symbol_name,
     f.kicad_footprint_id                                                AS footprint,
     s.description,
-    COALESCE(p.mpn, '')                                                 AS mpn,
+    COALESCE(s.mpn, '')                                                 AS mpn,
     COALESCE(sol.model_path, '')                                        AS model_path,
     COALESCE(sol.svg_path, '')                                          AS svg_path,
     s.id                                                                AS symbol_id,

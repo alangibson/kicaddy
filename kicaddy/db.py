@@ -97,7 +97,6 @@ CREATE TABLE IF NOT EXISTS part (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol_id    INTEGER NOT NULL REFERENCES symbol(id) ON DELETE CASCADE,
     footprint_id INTEGER NOT NULL REFERENCES footprint(id) ON DELETE CASCADE,
-    mpn          TEXT    NOT NULL DEFAULT '',
     UNIQUE (symbol_id, footprint_id)
 );
 
@@ -120,6 +119,11 @@ def get_connection(db_path: str) -> sqlite3.Connection:
 def create_schema(conn: sqlite3.Connection) -> None:
     """Execute all CREATE TABLE / CREATE INDEX DDL statements."""
     conn.executescript(_DDL)
+    # Migrations: drop columns removed from the schema (SQLite 3.35+)
+    try:
+        conn.execute("ALTER TABLE part DROP COLUMN mpn")
+    except Exception:
+        pass
     conn.commit()
 
 
@@ -363,17 +367,16 @@ def update_symbol_supplier_field(
 def insert_parts_from_links(conn: sqlite3.Connection) -> int:
     """
     Populate the part table from existing symbol→footprint links.
-    Only symbols with both a matched footprint and a non-empty MPN produce a part.
+    Any symbol with a matched footprint produces a part, regardless of MPN.
     Must be called after link_symbols_to_footprints().
     Uses INSERT OR IGNORE for idempotency.
     """
     cur = conn.execute(
         """
-        INSERT OR IGNORE INTO part (symbol_id, footprint_id, mpn)
-        SELECT id, footprint_id, mpn
+        INSERT OR IGNORE INTO part (symbol_id, footprint_id)
+        SELECT id, footprint_id
         FROM symbol
         WHERE footprint_id IS NOT NULL
-          AND mpn IS NOT NULL
         """
     )
     return cur.rowcount

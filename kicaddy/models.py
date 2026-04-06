@@ -148,7 +148,6 @@ class Footprint:
 class Part:
     symbol_id: int    # FK → symbol.id
     footprint_id: int # FK → footprint.id
-    mpn: str = ''
     id: int | None = None
 
 
