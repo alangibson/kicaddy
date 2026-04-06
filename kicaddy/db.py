@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS library (
     version           INTEGER  NOT NULL DEFAULT 0,
     generator         TEXT     NOT NULL DEFAULT '',
     generator_version TEXT     NOT NULL DEFAULT '',
-    name              TEXT     NOT NULL
+    name              TEXT     NOT NULL,
+    permissions       TEXT     NOT NULL DEFAULT 'ro'
 );
 
 CREATE TABLE IF NOT EXISTS footprint (
@@ -119,7 +120,11 @@ def get_connection(db_path: str) -> sqlite3.Connection:
 def create_schema(conn: sqlite3.Connection) -> None:
     """Execute all CREATE TABLE / CREATE INDEX DDL statements."""
     conn.executescript(_DDL)
-    # Migrations: drop columns removed from the schema (SQLite 3.35+)
+    # Migrations: add new columns / drop removed columns
+    try:
+        conn.execute("ALTER TABLE library ADD COLUMN permissions TEXT NOT NULL DEFAULT 'ro'")
+    except Exception:
+        pass
     try:
         conn.execute("ALTER TABLE part DROP COLUMN mpn")
     except Exception:
@@ -135,14 +140,15 @@ def upsert_library(conn: sqlite3.Connection, lib: Library) -> int:
     """
     cur = conn.execute(
         """
-        INSERT INTO library (library_path, library_type, version, generator, generator_version, name)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO library (library_path, library_type, version, generator, generator_version, name, permissions)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(library_path) DO UPDATE SET
             library_type      = excluded.library_type,
             version           = excluded.version,
             generator         = excluded.generator,
             generator_version = excluded.generator_version,
-            name              = excluded.name
+            name              = excluded.name,
+            permissions       = excluded.permissions
         RETURNING id
         """,
         (
@@ -152,6 +158,7 @@ def upsert_library(conn: sqlite3.Connection, lib: Library) -> int:
             lib.generator,
             lib.generator_version,
             lib.name,
+            lib.permissions,
         ),
     )
     row = cur.fetchone()
