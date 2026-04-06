@@ -126,7 +126,7 @@ class FootprintProperty:
 @dataclass
 class Solid:
     model_path: str              # fully resolved absolute path to the 3D model file
-    svg_path: str = ""           # absolute path to cached SVG render in ~/3dmodel.cache/
+    svg: str | None = None       # cached SVG content rendered from model_path, NULL until rendered
     footprint_id: int | None = None
     id: int | None = None
 
