@@ -473,16 +473,22 @@ class SearchDialog(wx.Dialog):
         parts_splitter.SplitVertically(self._parts_grid, self._preview_panel, sashPosition=1010)
         parts_splitter.SetMinimumPaneSize(200)
 
-        self._symbols_grid = _ResultGrid(self._notebook, _SYMBOL_COLUMNS, _symbol_field)
+        symbols_splitter = wx.SplitterWindow(self._notebook, style=wx.SP_LIVE_UPDATE)
+        self._symbols_grid = _ResultGrid(symbols_splitter, _SYMBOL_COLUMNS, _symbol_field)
+        self._symbol_preview_panel = _PreviewPanel(symbols_splitter)
+        symbols_splitter.SplitVertically(self._symbols_grid, self._symbol_preview_panel, sashPosition=820)
+        symbols_splitter.SetMinimumPaneSize(200)
+
         self._footprints_grid = _ResultGrid(self._notebook, _FOOTPRINT_COLUMNS, _footprint_field)
 
         self._notebook.AddPage(parts_splitter, "Parts (0)")
-        self._notebook.AddPage(self._symbols_grid, "Symbols (0)")
+        self._notebook.AddPage(symbols_splitter, "Symbols (0)")
         self._notebook.AddPage(self._footprints_grid, "Footprints (0)")
 
         self._notebook.AddPage(self._make_config_tab(), "Configuration")
 
         self._parts_grid.Bind(wx.grid.EVT_GRID_SELECT_CELL, self._on_part_selected)
+        self._symbols_grid.Bind(wx.grid.EVT_GRID_SELECT_CELL, self._on_symbol_selected)
         self._parts_grid.Bind(wx.grid.EVT_GRID_CELL_LEFT_DCLICK, self._on_item_activated)
         self._parts_grid.Bind(wx.grid.EVT_GRID_CELL_LEFT_CLICK, self._on_parts_cell_click)
         self._parts_grid.Bind(wx.grid.EVT_GRID_CELL_CHANGING, self._on_parts_cell_changing)
@@ -647,6 +653,27 @@ class SearchDialog(wx.Dialog):
                 self._preview_panel.show_message("No 3D model available")
         else:
             self._preview_panel.show_message("No 3D model available")
+        event.Skip()
+
+    def _on_symbol_selected(self, event: wx.grid.GridEvent) -> None:
+        from kicaddy import symbol_render
+        row = event.GetRow()
+        results = self._symbols_grid._table._results
+        if row >= len(results):
+            event.Skip()
+            return
+        result = results[row]
+        if result.svg:
+            self._symbol_preview_panel.show_svg(result.svg)
+        elif result.library_path and result.symbol_raw_name:
+            svg = symbol_render.render_symbol_to_svg(result.library_path, result.symbol_raw_name)
+            if svg:
+                result.svg = svg
+                self._symbol_preview_panel.show_svg(svg)
+            else:
+                self._symbol_preview_panel.show_message("Preview unavailable (kicad-cli not found or render failed)")
+        else:
+            self._symbol_preview_panel.show_message("No library path available")
         event.Skip()
 
     def _on_item_activated(self, event: wx.grid.GridEvent) -> None:

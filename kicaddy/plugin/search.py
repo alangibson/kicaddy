@@ -13,6 +13,9 @@ class SearchResult:
     description: str
     extra1: str        # MPN for symbols; Tags for footprints
     extra2: str        # Footprint string for symbols; Layer for footprints
+    library_path: str = ""       # absolute path to .kicad_sym file; empty for footprints
+    symbol_raw_name: str = ""    # symbol.name (unqualified); empty for footprints
+    svg: str | None = None       # in-session SVG cache
 
 
 @dataclass
@@ -47,8 +50,11 @@ SELECT
          ELSE s.name END                                               AS name,
     s.description,
     ''                                                                 AS extra1,
-    s.footprint                                                        AS extra2
+    s.footprint                                                        AS extra2,
+    l.library_path                                                     AS library_path,
+    s.name                                                             AS symbol_raw_name
 FROM symbol s
+JOIN library l ON l.id = s.library_id
 WHERE s.name             REGEXP ?
    OR s.extends          REGEXP ?
    OR s.kicad_library_id REGEXP ?
@@ -80,7 +86,9 @@ SELECT
     f.name,
     f.description,
     ''                                                                 AS extra1,
-    f.layer                                                            AS extra2
+    f.layer                                                            AS extra2,
+    ''                                                                 AS library_path,
+    ''                                                                 AS symbol_raw_name
 FROM footprint f
 WHERE f.name               REGEXP ?
    OR f.description        REGEXP ?
@@ -213,6 +221,8 @@ def run_search(db_path: str, pattern: str) -> list[SearchResult]:
             description=row[3] or "",
             extra1=row[4] or "",
             extra2=row[5] or "",
+            library_path=row[6] or "",
+            symbol_raw_name=row[7] or "",
         )
         for row in rows
     ]
